@@ -1,0 +1,44 @@
+name: CI
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: expense
+          POSTGRES_PASSWORD: expense
+          POSTGRES_DB: expense_tracker_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U expense -d expense_tracker_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go mod download
+      - run: make check-fmt vet test build
+      - name: PostgreSQL connection integration test
+        run: make integration
+        env:
+          TEST_DATABASE_URL: postgres://expense:expense@localhost:5432/expense_tracker_test?sslmode=disable
+      - name: Validate deployment image
+        run: docker build -t expense-tracker:ci .
+# Deployment is intentionally not wired until Render and Neon are configured.
