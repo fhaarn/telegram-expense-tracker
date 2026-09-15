@@ -110,7 +110,7 @@ func Respond(p Profile, m Message) Decision {
 		if err != nil {
 			return Decision{Reply: "🤔 Please use a name with 1–40 characters on one line."}
 		}
-		return Decision{Name: name, Activate: true, Reply: "✅ Nice to meet you, " + name + "!\nSend your first expense, like bensin 100k."}
+		return Decision{Name: name, Activate: true, Reply: "✅ Nice to meet you, " + name + "!\nSend your first expense, like bensin 100k.\n\n💡 Send /help to see the commands and how to use the bot."}
 	}
 	if m.Image {
 		return Decision{Reply: "🧾 Screenshot reading is coming in phase 2."}
