@@ -14,14 +14,19 @@ type Config struct {
 	Port          string
 	DatabaseURL   string
 	BotToken      string
-	AllowedUserID int64
+	BotUsername   string
 	WebhookSecret string
 	Timezone      *time.Location
 	Currency      string
 }
 
 func Load(getenv func(string) string) (Config, error) {
-	c := Config{Port: getenv("PORT"), DatabaseURL: getenv("DATABASE_URL"), BotToken: getenv("TELEGRAM_BOT_TOKEN"), WebhookSecret: getenv("TELEGRAM_WEBHOOK_SECRET"), Currency: getenv("DEFAULT_CURRENCY")}
+	c := Config{BotUsername: strings.TrimPrefix(getenv("TELEGRAM_BOT_USERNAME"), "@"), Port: getenv("PORT"), DatabaseURL: getenv("DATABASE_URL"), BotToken: getenv("TELEGRAM_BOT_TOKEN"), WebhookSecret: getenv("TELEGRAM_WEBHOOK_SECRET"), Currency: getenv("DEFAULT_CURRENCY")}
+	for _, r := range c.BotUsername {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_') {
+			return Config{}, fmt.Errorf("TELEGRAM_BOT_USERNAME must be a Telegram username")
+		}
+	}
 	if c.Port == "" {
 		c.Port = "8080"
 	}
@@ -42,10 +47,6 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 	if strings.TrimSpace(c.BotToken) == "" {
 		return Config{}, fmt.Errorf("TELEGRAM_BOT_TOKEN is required")
-	}
-	c.AllowedUserID, err = strconv.ParseInt(getenv("TELEGRAM_ALLOWED_USER_ID"), 10, 64)
-	if err != nil || c.AllowedUserID <= 0 {
-		return Config{}, fmt.Errorf("TELEGRAM_ALLOWED_USER_ID must be a positive integer")
 	}
 	if len(c.WebhookSecret) < 1 || len(c.WebhookSecret) > 256 {
 		return Config{}, fmt.Errorf("TELEGRAM_WEBHOOK_SECRET must contain 1 to 256 allowed characters")

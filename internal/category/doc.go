@@ -1,3 +1,3 @@
-// Package category is reserved for custom categories and remembered description mappings.
-// Feature implementation is tracked in docs/phase-1-task.md.
+// Package category contains category presentation helpers. Transactional custom
+// category creation and description memory currently live in internal/postgres.
 package category

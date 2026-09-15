@@ -8,7 +8,7 @@ permissions:
   contents: read
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -34,11 +34,34 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: go mod download
-      - run: make check-fmt vet test build
-      - name: PostgreSQL connection integration test
-        run: make integration
+      - name: Check, run all tests, and build
+        run: make check-fmt vet test build
         env:
           TEST_DATABASE_URL: postgres://expense:expense@localhost:5432/expense_tracker_test?sslmode=disable
       - name: Validate deployment image
         run: docker build -t expense-tracker:ci .
-# Deployment is intentionally not wired until Render and Neon are configured.
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.RENDER_DEPLOY_ENABLED == 'true'
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Skip obsolete main revisions
+        id: revision
+        shell: bash
+        run: |
+          current_sha=$(git ls-remote origin refs/heads/main | cut -f1)
+          if [[ "$current_sha" == "$GITHUB_SHA" ]]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "A newer main commit exists; skipping this deployment."
+            echo "current=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Deploy tested commit and verify release
+        if: steps.revision.outputs.current == 'true'
+        run: python3 scripts/deploy_render.py
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ vars.RENDER_SERVICE_ID }}
+          RENDER_HEALTH_URL: ${{ vars.RENDER_HEALTH_URL }}

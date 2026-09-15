@@ -1,73 +1,153 @@
 # Telegram Expense Tracker
 
-Personal expense tracker in Go. Design: [HLD](docs/HLD.md). Implementation checklist: [Phase 1 tasks](docs/phase-1-task.md).
+Go + PostgreSQL Telegram expense tracker. [HLD](docs/HLD.md) · [Phase 1 checklist](docs/phase-1-task.md).
 
-## Current status
+## Implemented Phase 1
 
-Runnable infrastructure skeleton: validated configuration, PostgreSQL connection pool,
-HTTP health/readiness endpoints, graceful shutdown, Docker packaging, and GitHub CI.
-Telegram SDK construction is available but not connected to the server. Expense parsing,
-categories, reports, database schema, webhook intake, and deployment are not implemented.
-No Telegram webhook is registered or acknowledged by this skeleton.
+Private-chat registration, text expenses, category memory and custom categories,
+editable drafts, saved-expense edits/deletions, daily/monthly reports, and one-to-one
+comparison invites are implemented. Every expense requires Save before it affects reports.
 
-## Local development
+```text
+/start → choose your display name
+bensin 100k → choose Transport → Save
+bensin 25k → Transport is remembered → Save
+Nice 8 Ball Cafe 100k → preserves the full café name
+```
 
-Requirements: Go 1.26.4+, Docker with its daemon running, and Make.
-The module name is locally `telegram-expense-tracker`; replace it and internal import
-prefixes with the actual GitHub module path once the repository owner is chosen.
+Only the final token is the amount: digits with optional `k`/`K`, without punctuation
+or decimals. IDR values use integer minor units (Rp1 = 100 units). Descriptions are
+limited to 200 characters. Category names are 1–40 characters on one line; equivalent
+case/whitespace names reuse the existing category. Category learning happens on Save.
+
+Commands: `/start`, `/help`, `/today`, `/month`, `/recent`, `/compare`, `/disconnect`,
+and `/cancel`. The recent view offers Edit/Delete; deletion requires confirmation.
+Drafts expire after 24 hours. A category correction can apply once or be remembered.
+Reports contain confirmed, non-deleted expenses and use the user's stored timezone.
+
+`/compare` creates a 24-hour invite when unpaired; set `TELEGRAM_BOT_USERNAME` (without
+`@`) to enable links. New users complete registration before confirming Connect.
+Each person can have one partner. Paired `/compare` shares only totals/counts from
+the connection's local calendar date onward, including earlier entries on that date.
+`/disconnect` requires confirmation and removes access for both people. Already sent
+Telegram messages cannot be recalled. No merchant/category details are shared.
+
+Screenshot OCR remains Phase 2: actual representative GoFood screenshots are needed
+before implementing a verified template. Images currently receive a coming-later reply.
+
+## Local setup
+
+Requirements: Go 1.26.4+, Docker with a running daemon, and Make.
 
 ```sh
 cp .env.example .env
+# Edit .env: set your development bot token and a random webhook secret.
 make db-up
-set -a
-. ./.env
-set +a
+make migrate-up
 make run
 ```
 
-The app reads exported environment variables; it does not automatically load `.env`.
-The example token/owner/secret are placeholders. They allow health-only local startup;
-replace them with a separate development bot's settings before implementing intake.
+The app, migration command, and webhook-registration command automatically load `.env` from the current working directory. Run them from the project root. Existing environment variables take precedence, even when explicitly empty. A missing `.env` is fine on Render; malformed or unreadable files stop startup with a sanitized error. Restart the command after editing `.env`.
+The old `TELEGRAM_ALLOWED_USER_ID` setting is removed: every private-chat sender can
+register. Use a separate development bot from production.
+
+Startup checks PostgreSQL, applies migrations under a lock, then starts HTTP and
+reply delivery. Ctrl-C/SIGTERM drains HTTP and stops the worker before closing the
+pool. No webhook is registered automatically.
+
+- `GET /healthz`: process health, no database query (suitable for frequent hosting probes).
+- `GET /readyz`: database readiness with a timeout.
+- `POST /telegram/webhook`: secret-header-protected Telegram updates, maximum 1 MiB.
+
+To connect a real bot, expose the application at a public HTTPS address (Render or
+a development tunnel), then explicitly register that endpoint:
 
 ```sh
-curl http://localhost:8080/healthz
-curl http://localhost:8080/readyz
+export TELEGRAM_WEBHOOK_URL=https://your-host.example/telegram/webhook
+make webhook-register
 ```
 
-`/healthz` checks the process without querying PostgreSQL. `/readyz` verifies a database
-connection with a timeout. Use `/healthz` for frequent hosting health checks to avoid
-continually waking a sleeping Neon database. Startup checks database connectivity.
-Ctrl-C or SIGTERM shuts down HTTP before closing the pool.
+The command configures the shared secret, message and callback updates, and one webhook connection
+to minimize out-of-order onboarding messages; it preserves pending Telegram updates.
+Open the bot in Telegram, tap Start, and enter your name. Repeat with a second account.
+Never register a local test endpoint against your production bot.
+
+## Reliability and privacy
+
+Each accepted update commits its deduplication ID, user transition, and queued reply
+in one PostgreSQL transaction before HTTP 200. Failures return 503 for Telegram to
+retry. The synchronous Phase 1 flow has no separate unfinished input job: it either
+commits fully or rolls back. Raw Telegram payloads are not retained.
+
+Replies use a durable outbox, per-user ordering, 30-second leases, and up to five
+attempts with backoff. Startup resumes unsent replies. The worker sleeps without
+querying the database when idle and wakes on incoming updates. If multiple app
+instances are later introduced, add cross-instance wakeup/coordination. Hosting sleep
+may delay retries until the next wakeup. A network failure after Telegram accepted a
+reply may duplicate the reply, but cannot duplicate confirmed expenses, registration, categories, or pairing.
+
+All intake transactions currently share one advisory lock to keep cross-user pairing
+safe; this intentionally targets a small group, not high throughput. Each user has a
+60-update/minute limit (one wait reply, then excess updates are acknowledged without
+processing), and at most five invites can be created per hour. Limits persist in PostgreSQL.
+
+Successful/failed outbox bodies and keyboards are cleared. Queued pair messages are
+suppressed when the relationship is no longer active before claim; an already in-flight
+send can still finish after disconnect. Failed rows are available for operational
+inspection (`notification_outbox.status = 'failed'`); no automatic infinite retries.
+The app logs operation IDs and generic errors, not token values or message bodies.
+Remote application database connections require `sslmode=verify-full`.
+
+## Verification
 
 ```sh
-make check-fmt vet test build
-TEST_DATABASE_URL="$DATABASE_URL" make integration
+make test             # All Go unit + integration tests and Python script tests
+make test-unit        # Unit tests only; no PostgreSQL/Docker needed
+make integration      # Database/Telegram integration packages
+make check-fmt vet build
 ```
 
-Integration tests currently perform a connection/SELECT check only. Use a dedicated
-test database as tests expand. `make db-down` stops PostgreSQL while retaining its
-named volume. `make migrate-up` intentionally reports that migrations are pending;
-see [migrations](migrations/README.md).
+`make test` starts its own PostgreSQL 17 container on a random localhost port, waits
+for readiness, runs the suite without caching, and removes the container afterward,
+including after failure. Start Docker first; `make db-up` is not required for tests.
+The test runner does not read `.env` and never uses the application's `DATABASE_URL`.
+Python 3 is required for the operation-script unit tests.
 
-## Deployment preparation
-
-Target: Render web service + Neon PostgreSQL, using Telegram webhooks. Remote database
-URLs must use `sslmode=verify-full`. Set secrets through Render environment settings;
-never commit a real token, database password, webhook secret, or `.env` file.
+If CI or your shell already provides a dedicated database, reuse it without starting
+or removing a container:
 
 ```sh
-docker build -t telegram-expense-tracker .
+TEST_DATABASE_URL='postgres://expense:expense@localhost:5432/expense_tracker_test?sslmode=disable' make test
 ```
 
-Run the image with environment variables and a reachable database. `localhost` inside
-a container is that container, so the local host database URL must be adjusted.
+Only supply an isolated test database: integration tests create and drop schemas.
+A supplied database is not removed by the runner. CI supplies its PostgreSQL service
+to the same `make test` command, so tests are not run twice.
 
-CI runs on pull requests targeting main and pushes to main. It checks formatting,
-vet, race-enabled tests, Go build, a temporary PostgreSQL integration check, and Docker
-build. Actual deploy hooks, migration automation, webhook registration, and hosting
-accounts are still pending; no automatic deployment is enabled yet.
+Tests cover final-token parsing and integer limits, onboarding, callback authentication,
+owner isolation, category learning/custom categories, stale drafts/mappings/revisions,
+expense edits/deletions, report boundaries, invite consent/concurrency/disconnection,
+transaction rollback, durable reply recovery, and a fake Telegram delivery path.
+No tests send messages to real Telegram accounts.
 
-Use feature branch → pull request → passing CI → merge to main. The future deployment
-job will deploy the tested revision after main checks pass. Render Free can sleep and
-lose local files; all durable state belongs in PostgreSQL. Database backups and a
-restore procedure are required before using this for real expense history.
+## Deployment status
+
+Target: Render + Neon. CI runs formatting, vet, race tests, Go build, isolated
+PostgreSQL integration tests, and Docker build. The opt-in deployment job uses the
+Render API to deploy the tested commit, serializes requests, and checks release
+status and application health. See [deployment setup](docs/deployment.md) for the
+required GitHub variables/secrets and Render settings.
+
+[Operations](docs/operations.md) covers backup/restore and rollback. Scripts have
+been rehearsed with synthetic data in a temporary database; actual off-host backup
+storage, scheduling, hosting accounts, production secrets, and live Telegram tests
+remain pending. Render Free sleeps; durable data stays in PostgreSQL.
+
+Use feature branch → PR → passing CI → merge to main. No deployment occurs until
+explicitly enabled in repository settings. The module name remains
+`telegram-expense-tracker`.
+
+
+Weekly records: connected partners receive emoji alerts when a newly saved expense beats the week's largest single expense in the same category across the pair. Weeks run Monday–Sunday (default Asia/Jakarta), counting from the connection date. The first entry is quiet; ties, edits, and deletions do not send alerts. Partner alerts share the category and amount, never the description. Categories match by normalized name. Historical weeks and future-dated expenses do not trigger alerts.
+
+Weekly record baselines are cached in `weekly_category_records` (migration 005, applied at startup). Ordinary saves use a keyed lookup; missing/date-stale baselines and corrections are rebuilt from expenses. No reset job is required.

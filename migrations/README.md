@@ -1,9 +1,13 @@
-# Database migrations
+# PostgreSQL migrations
 
-Reserved for versioned PostgreSQL SQL migrations. No application schema exists yet.
-`make migrate-up` intentionally fails until the migration runner and schema are implemented.
-The health-only skeleton requires a reachable empty PostgreSQL database, not tables.
+`001_onboarding.sql` adds users, per-user categories, pending name interactions,
+processed update IDs, and a durable reply outbox. Expense and comparison tables
+will arrive in subsequent migrations.
 
-Next: add a migration runner with a database lock, then category, draft, expense,
-interaction, and inbound-update tables. Production migrations must complete before
-new application code serves traffic and remain compatible with the preceding release.
+Run `make migrate-up` with `DATABASE_URL` exported. Application startup also applies
+pending migrations before serving HTTP. SQL is embedded into the executable.
+The runner uses a PostgreSQL transaction-scoped advisory lock, SHA-256 checksums,
+and an atomic transaction. Re-running is safe; editing an applied migration fails.
+Add a new numbered migration instead. Do not reset a production database to resolve
+a checksum failure. There is no automatic down migration: use forward fixes and
+keep future migrations compatible with the previous release.

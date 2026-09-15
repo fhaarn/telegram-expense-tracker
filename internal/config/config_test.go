@@ -6,7 +6,7 @@ import (
 )
 
 func TestLoad(t *testing.T) {
-	base := map[string]string{"DATABASE_URL": "postgres://u:p@localhost/db?sslmode=disable", "TELEGRAM_BOT_TOKEN": "test-token", "TELEGRAM_ALLOWED_USER_ID": "123", "TELEGRAM_WEBHOOK_SECRET": "test_secret"}
+	base := map[string]string{"DATABASE_URL": "postgres://u:p@localhost/db?sslmode=disable", "TELEGRAM_BOT_TOKEN": "test-token", "TELEGRAM_WEBHOOK_SECRET": "test_secret"}
 	tests := []struct {
 		name, key, value string
 		bad              bool
@@ -14,7 +14,6 @@ func TestLoad(t *testing.T) {
 		{name: "defaults"},
 		{"bad port", "PORT", "0", true},
 		{"missing token", "TELEGRAM_BOT_TOKEN", "", true},
-		{"bad owner", "TELEGRAM_ALLOWED_USER_ID", "-1", true},
 		{"bad timezone", "TZ", "invalid/zone", true},
 		{"bad currency", "DEFAULT_CURRENCY", "USD", true},
 		{"bad secret", "TELEGRAM_WEBHOOK_SECRET", "spaces forbidden", true},

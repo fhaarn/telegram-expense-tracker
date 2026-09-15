@@ -1,3 +1,4 @@
-// Package expense is reserved for expense drafts and confirmation rules.
-// Feature implementation is tracked in docs/phase-1-task.md.
+// Package expense reserves a boundary for database-independent expense rules.
+// Current draft, confirmation, revision and deletion operations are transactional
+// and implemented in internal/postgres/expenses.go.
 package expense

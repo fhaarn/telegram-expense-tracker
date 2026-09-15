@@ -9,7 +9,7 @@ import (
 
 type Pinger interface{ Ping(context.Context) error }
 
-func Handler(db Pinger) http.Handler {
+func Handler(db Pinger, webhook ...http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -25,10 +25,12 @@ func Handler(db Pinger) http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"ready"}`))
 	})
-	// No webhook is registered until durable Telegram intake is implemented.
+	if len(webhook) > 0 {
+		mux.Handle("POST /telegram/webhook", webhook[0])
+	}
 	return mux
 }
 
-func New(port string, db Pinger) *http.Server {
-	return &http.Server{Addr: ":" + port, Handler: Handler(db), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second}
+func New(port string, db Pinger, webhook ...http.Handler) *http.Server {
+	return &http.Server{Addr: ":" + port, Handler: Handler(db, webhook...), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second}
 }

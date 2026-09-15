@@ -1,6 +1,6 @@
 # Telegram Expense Tracker — High-Level Design
 
-Status: Design for review; multi-user onboarding and comparison added, implementation pending  
+Status: Phase 1 repository implementation complete; live Telegram and hosting verification pending
 Date: 2026-09-14
 
 ## 1. Purpose
@@ -285,6 +285,8 @@ Suggested Go layout: `cmd/bot`, `internal/telegram`, `internal/user`, `internal/
 
 ## 5. Data model
 
+Implementation status: migration 001 creates `users`, `categories`, `user_interactions` (onboarding only), `inbound_updates` (processed IDs only), and `notification_outbox` (registration replies). The full target model below includes future expense and pairing fields/tables. Those will be added in later migrations.
+
 | Entity | Main fields | Purpose |
 | --- | --- | --- |
 | User | Internal ID, unique Telegram user ID, chat ID, optional username, display name, status, timezone, currency, timestamps | Identity and registration |
@@ -315,7 +317,7 @@ Do not retain raw image bytes or full OCR output by default. Remove raw inbound 
 
 1. Receive a Telegram webhook, verify its secret header and request size, and authorize its sender/private chat.
 2. Persist authorized inbound work under a unique Telegram update ID before returning a successful webhook response. Return a retryable error if persistence fails; repeated delivery must not duplicate expenses. Local polling may be added for a separate development bot, acknowledging only after durable intake.
-3. Process durable pending work. Text parsing is immediate; image extraction runs through a bounded worker to keep commands responsive.
+3. Phase 1 processes the user/expense/comparison transition and queues its reply in the same transaction as update deduplication before acknowledging the webhook; it needs no separate input worker. Future expense/OCR workflows can introduce durable pending work. Replies already use a persistent outbox with bounded retry and restart recovery.
 4. For text, look up the normalized description in category mappings. Persist the draft and ask for a category if no match exists; otherwise send its preview. Screenshot drafts use the separately validated extraction suggestion or request a category when missing.
 5. If extraction fails, show a retry/manual-entry option. Never create a confirmed expense from a failed or incomplete extraction.
 
@@ -329,11 +331,11 @@ Field edits keep the draft pending. Drafts expire after a configurable interval,
 
 ### Atomic pairing and notifications
 
-Redeem an invite in one transaction: lock both user rows in stable ID order, lock/recheck the invitation, validate its status/expiry and both users' registration and absence of active membership, create the pair and its two memberships, consume the invite, revoke their other invites, and insert notification outbox events. A primary key on active membership's user ID prevents a person joining two pairs even through concurrent invitations. Use consistent lock order for pairing, rotation, and disconnect; retry serialization/deadlock failures within a bound.
+Redeem an invite in one transaction: lock both user rows in stable ID order, lock/recheck the invitation, validate its status/expiry and both users' registration and absence of active membership, create the pair and its two memberships, consume the invite, revoke their other invites, and insert notification outbox events. A primary key on active membership's user ID prevents a person joining two pairs even through concurrent invitations. The initial implementation takes a shared transaction advisory lock before user locks for every update. This serializes writes for a small group and prevents cross-user lock inversion. Database failures roll back and return HTTP 503 so Telegram retries; there is no pending input worker. Revisit lock granularity before wider scaling.
 
 Repeated acceptance by the same successful recipient returns the existing relationship result; acceptance by a different user fails. The permanent pair ID is separate from the invitation token. Disconnect locks/rechecks the relationship and removes both active memberships in a transaction. Comparison queries recheck active membership in the query/snapshot; new requests after disconnect cannot fetch the former partner's totals. Already delivered Telegram messages cannot be recalled by this access change.
 
-Send the two requested connection notifications only after commit using a durable outbox. Deduplicate enqueueing by event/recipient; retry transient failures and handle blocked bots as undeliverable without rolling back the connection. Telegram sends can still duplicate after an ambiguous network timeout, so promise exactly-once pairing, not exactly-once messaging. Before sending a delayed connection event, recheck that the pair is still active so obsolete notifications are not delivered after disconnection.
+Send the two requested connection notifications only after commit using a durable outbox. Deduplicate enqueueing by event/recipient; retry transient failures and handle blocked bots as undeliverable without rolling back the connection. Telegram sends can still duplicate after an ambiguous network timeout, so promise exactly-once pairing, not exactly-once messaging. Before claiming a delayed pair event/report, check that the pair is still active and suppress obsolete events. A send already in flight may complete after disconnection; already delivered messages cannot be recalled.
 
 ### Confirmation and duplicate protection
 
@@ -373,17 +375,17 @@ Before implementing a template, inspect representative GoFood screenshots suppli
 
 ## 8. Deployment and operations
 
-Development: run the Go executable with PostgreSQL in Docker Compose. Use a separate development Telegram bot; local polling or a development HTTPS tunnel can be added when intake is implemented. The initial skeleton exposes health endpoints only.
+Development: run the Go executable with PostgreSQL in Docker Compose. Use a separate development Telegram bot; local polling or a development HTTPS tunnel can be added when intake is implemented. The application exposes health endpoints and a secret-verified message/callback webhook. Use `make webhook-register` to configure an existing public HTTPS endpoint explicitly.
 
 Personal deployment: Render web service with Neon PostgreSQL and an HTTPS Telegram webhook. Render Free can sleep after inactivity and loses local file changes on restart/redeploy; keep all durable state in PostgreSQL. Incoming webhook requests can wake the app, but the first response can be delayed. Check provider quotas at setup; do not use an expiring free Render database for permanent history. Phase 2 OCR resource use must be measured before choosing the hosting tier.
 
-Configuration: Telegram bot token, database URL, HTTP port, webhook secret, default currency, timezone, and, in phase 2, OCR paths/limits. Read secrets from environment; never commit or log them. Replace the skeleton's required TELEGRAM_ALLOWED_USER_ID with database-backed user identity before enabling registration; the current code still has the single-owner configuration and does not implement onboarding or pairing. Require verified TLS for remote PostgreSQL connections.
+Configuration: Telegram bot token, database URL, HTTP port, webhook secret, default currency, timezone, and, in phase 2, OCR paths/limits. Read secrets from environment; never commit or log them. Local commands automatically load an optional `.env` from the working directory without overriding existing variables; Render can supply all configuration directly without a file. Database-backed onboarding replaces TELEGRAM_ALLOWED_USER_ID. Comparison links require optional TELEGRAM_BOT_USERNAME configuration. Require verified TLS for remote PostgreSQL connections.
 
 Use a small PostgreSQL connection pool and bounded query/connection timeouts. Liveness health checks must not query the database repeatedly; expose a separate on-demand readiness endpoint. Avoid continuous aggressive background polling that keeps Neon compute awake. Durable job processing must recover after sleep/restart.
 
 Apply versioned SQL migrations with locking before new code serves traffic. Migration failures must stop the release; changes must remain compatible with the preceding app version during rollout. Keep write transactions short and never hold one open during network calls.
 
-GitHub Actions runs formatting, vet, tests, and builds on pull requests and pushes to main, with an isolated PostgreSQL service for integration tests. Once hosting is configured, deploy the tested main revision after passing checks, serialize deploy requests, and verify release completion. Keep deploy-hook credentials in GitHub secrets and disable competing Render auto-deploy triggers. The skeleton has CI only; automatic deployment is not yet enabled.
+GitHub Actions runs formatting, vet, tests, and builds on pull requests and pushes to main, with an isolated PostgreSQL service for integration tests. Once hosting is configured, deploy the tested main revision after passing checks, serialize deploy requests, and verify release completion. Keep the Render API key in GitHub secrets and disable competing Render auto-deploy triggers. Deployment wiring is opt-in and requires external service settings; see deployment.md.
 
 Back up PostgreSQL through consistent logical backups or managed snapshots with appropriate retention, stored independently of Render's ephemeral filesystem. Verify a restore before relying on the tracker for real records. Handle shutdown by stopping intake and leaving unfinished durable work recoverable. Code rollback does not reverse schema migrations.
 
@@ -430,7 +432,7 @@ Acceptance: supported GoFood screenshots produce reviewable drafts with the corr
 ## 10. Decisions to revisit
 
 - Confirm IDR and Asia/Jakarta defaults for all initial users.
-- Confirm the proposed comparison scope: totals/counts only, from the connection date onward; invitation expiry initially 24 hours.
+- Initial comparison policy: totals/counts only, from the connection local calendar date onward (including entries earlier that date); invitations expire after 24 hours. Changing that policy remains a product decision.
 - Before phase 2, collect representative GoFood screenshots and verify the initial layout, total labels, languages, and currency/date formats.
 - Verify Render/Neon quotas and regions at setup; benchmark OCR before selecting phase 2 compute.
 - Decide whether screenshot retention is ever needed; initial design retains no originals.
@@ -449,3 +451,52 @@ These decisions do not block the text-only implementation.
 - Neon pricing: https://neon.com/pricing
 
 - Telegram deep links and start payloads: https://core.telegram.org/bots/features#deep-linking
+
+## Implemented operational boundaries
+
+- All input transitions and their durable reply commit together. Raw inbound message payloads are not stored; update IDs remain for deduplication.
+- The persisted burst limit is 60 updates per user per minute, with one wait message at the limit; excess updates are acknowledged and skipped. Invite creation is limited to five per hour.
+- `TELEGRAM_BOT_USERNAME` enables deep links without calling Telegram during startup. The secret/token remain environment-only.
+- Telegram messages use plain text and inline keyboard labels, preventing user content from becoming formatting instructions.
+- Local fake-transport and isolated PostgreSQL tests do not replace a live Telegram session, Render sleep/wake test, or production backup restore rehearsal.
+
+Deployment configuration and operations are detailed in [deployment.md](deployment.md) and [operations.md](operations.md).
+
+
+### Weekly category records
+
+- [x] Alert both connected partners when a newly saved expense strictly exceeds the current week's largest single expense in the same normalized category across both partners.
+- [x] Use Monday–Sunday in the user's configured timezone (default Asia/Jakarta), limited to expense dates on or after the connection date and no later than today.
+- [x] Establish the first expense quietly; equal/lower amounts do not trigger alerts. Previous-week and future-dated entries do not trigger live alerts.
+- [x] Append the owner's emoji record message to the Save confirmation; enqueue the partner's name/category/amount alert in the same transaction. Never include the purchase description in the partner alert.
+- [x] Match user-owned categories by normalized name; differently named categories remain separate.
+- [x] Store weekly category baselines in weekly_category_records. Edits/deletions rebuild cached baselines from nondeleted expenses without alerts. No weekly reset job is needed.
+- [x] Preserve intake serialization, duplicate-update protection, and pair-scoped outbox suppression after disconnection.
+- [x] Explain category/amount sharing in invitation and connection consent messages. Existing active connections also receive alerts after this update.
+
+Monthly comparison totals remain unchanged; there are no monthly record alerts.
+
+
+### Stored weekly category records
+
+Migration `005_weekly_records.sql` adds `weekly_category_records`:
+
+| Column | Type | Purpose |
+| --- | --- | --- |
+| pair_id | BIGINT FK → comparison_pairs | Pair being compared |
+| week_start | DATE | Monday of the expense week |
+| category_key | TEXT | Normalized category name shared across users |
+| expense_id | BIGINT nullable FK → expenses | Current winning expense |
+| amount_minor | BIGINT nullable | Cached winning amount |
+| evaluated_through | DATE | Local date through which expenses were eligible |
+| updated_at | TIMESTAMPTZ | Last baseline update |
+
+Primary key: `(pair_id, week_start, category_key)`. Amount and expense ID are both null for an empty baseline. Ties keep the existing winner; rebuilding breaks ties by lowest expense ID.
+
+On a normal new Save, read the keyed record and update it only for a greater amount. A missing record is initialized from existing pair expenses, excluding the new expense, so rollout and newly connected pairs preserve the correct baseline. Initialization is lazy and sends no historical notifications. Refresh on local date changes to incorporate previously future-dated entries. Historical/future additions do not send live alerts.
+
+Edits and deletions rebuild all already-materialized buckets for the active pair in the same transaction. This intentionally favors correctness for infrequent corrections, including category/date moves. Unmaterialized destination buckets initialize on demand. Ended pair rows are retained and never reused for a new connection. This table is a cache of current expenses, not an immutable history of past record holders.
+
+Expense updates, record maintenance, and notification enqueueing commit atomically under the existing intake advisory lock. Normal same-day Saves no longer aggregate the week's expenses. Initialization, daily refresh, and corrections still query expenses; there is no scheduled weekly reset.
+
+Drafts remain separate from confirmed expenses so pending edits cannot change reports before Save. `active_pair_members.slot` remains constrained to 1 or 2 with unique `(pair_id, slot)`; slots have no privilege differences.

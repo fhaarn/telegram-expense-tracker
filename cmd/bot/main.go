@@ -11,6 +11,8 @@ import (
 	"telegram-expense-tracker/internal/config"
 	"telegram-expense-tracker/internal/httpserver"
 	"telegram-expense-tracker/internal/postgres"
+	"telegram-expense-tracker/internal/telegram"
+	"telegram-expense-tracker/migrations"
 	"time"
 )
 
@@ -21,8 +23,10 @@ func main() {
 		os.Exit(1)
 	}
 }
-
 func run(logger *slog.Logger) error {
+	if err := config.LoadDotEnv(".env"); err != nil {
+		return err
+	}
 	cfg, err := config.Load(os.Getenv)
 	if err != nil {
 		return err
@@ -34,10 +38,35 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer pool.Close()
-	server := httpserver.New(cfg.Port, pool)
+	migrationCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	err = migrations.Apply(migrationCtx, pool)
+	cancel()
+	if err != nil {
+		return errors.New("database migration failed")
+	}
+	client, err := telegram.NewClient(cfg.BotToken)
+	if err != nil {
+		return errors.New("Telegram client initialization failed")
+	}
+	wake := make(chan struct{}, 1)
+	notify := func() {
+		select {
+		case wake <- struct{}{}:
+		default:
+		}
+	}
+	store := &postgres.Onboarding{Pool: pool, Timezone: cfg.Timezone.String(), Currency: cfg.Currency, BotUsername: cfg.BotUsername}
+	server := httpserver.New(cfg.Port, pool, telegram.Webhook(cfg.WebhookSecret, store, notify))
+	workerCtx, stopWorker := context.WithCancel(context.Background())
+	workerDone := make(chan struct{})
+	go func() {
+		defer close(workerDone)
+		telegram.RunDelivery(workerCtx, postgres.Outbox{Pool: pool}, telegram.BotSender{Bot: client}, wake, logger)
+	}()
+	defer func() { stopWorker(); <-workerDone }()
 	failures := make(chan error, 1)
 	go func() { failures <- server.ListenAndServe() }()
-	logger.Info("HTTP server starting", "port", cfg.Port, "telegram_handlers", "not implemented")
+	logger.Info("HTTP server starting", "port", cfg.Port, "feature", "phase 1 expense tracker")
 	select {
 	case err := <-failures:
 		if !errors.Is(err, http.ErrServerClosed) {

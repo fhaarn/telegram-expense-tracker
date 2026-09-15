@@ -5,3 +5,6 @@
 bin
 coverage.out
 work
+
+__pycache__
+*.pyc

@@ -1,3 +1,4 @@
-// Package report is reserved for daily and monthly expense summaries.
-// Feature implementation is tracked in docs/phase-1-task.md.
+// Package report reserves a boundary for database-independent report models.
+// Current owner-scoped SQL aggregation and pagination are implemented in
+// internal/postgres/expenses_report.go.
 package report
