@@ -223,11 +223,12 @@ func TestComparisonOnboardingInvitePersistsAndConsent(t *testing.T) {
 	// Recreate application while recipient is still choosing a name.
 	service = &Onboarding{Pool: pool, Timezone: "Asia/Jakarta", Currency: "IDR", BotUsername: "test_bot"}
 	send(5, 202, "Bob", "")
+	send(50, 202, "", "profile:smoker:no")
 	var count int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM active_pair_members`).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("paired before consent: %d %v", count, err)
 	}
-	if err := pool.QueryRow(ctx, `SELECT body FROM notification_outbox WHERE update_id=5`).Scan(&body); err != nil || !strings.Contains(body, "Connect with Alice?") {
+	if err := pool.QueryRow(ctx, `SELECT body FROM notification_outbox WHERE update_id=50`).Scan(&body); err != nil || !strings.Contains(body, "Connect with Alice?") {
 		t.Fatalf("lost invite: %q %v", body, err)
 	}
 	var invite int64

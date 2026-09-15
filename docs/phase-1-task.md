@@ -218,3 +218,8 @@ Monthly comparison totals remain unchanged; there are no monthly record alerts.
 
 - [x] Add migration 005 for keyed weekly record caching with lazy initialization and daily refresh.
 - [x] Keep cached winners synchronized on edits/deletions; test tie handling and runner-up promotion.
+
+- [x] Add nullable smoking preference, Yes/No onboarding question, and unanswered-user /start prompt.
+- [x] Add Coffee & drinks for everyone and conditionally visible Smoking & vaping; backfill active users.
+- [x] Enforce category visibility for picker, mappings, callbacks, and Save; preserve reports and invitation flow.
+- [x] Test preferences, stale callbacks, visibility, and comparison invitation onboarding.

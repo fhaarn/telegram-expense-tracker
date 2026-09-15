@@ -500,3 +500,12 @@ Edits and deletions rebuild all already-materialized buckets for the active pair
 Expense updates, record maintenance, and notification enqueueing commit atomically under the existing intake advisory lock. Normal same-day Saves no longer aggregate the week's expenses. Initialization, daily refresh, and corrections still query expenses; there is no scheduled weekly reset.
 
 Drafts remain separate from confirmed expenses so pending edits cannot change reports before Save. `active_pair_members.slot` remains constrained to 1 or 2 with unique `(pair_id, slot)`; slots have no privilege differences.
+
+
+### Smoking preference and beverage category
+
+Migration 006 adds nullable `users.is_smoker`: null means unanswered, true means Yes, and false means No. `Coffee & drinks` and `Smoking & vaping` are built-in user-owned categories, backfilled for active users and seeded during onboarding. Existing Food & drinks expenses and category names remain unchanged.
+
+After name entry, show “🚬 Do you smoke or vape?” with Yes/No buttons and a /help hint. No coffee announcement is sent. Existing users with a null preference receive the question on /start. The first answer is persisted; replayed or stale buttons cannot overwrite it. A pending comparison invitation resumes after the answer, preserving explicit partner consent.
+
+Coffee & drinks is visible to everyone. Smoking & vaping appears in category pickers and automatic mappings only for Yes users. Server-side selection and Save validation also enforce the preference, including manually entered category names. Reports retain all historical expenses regardless of preference. The preference is not shared with comparison partners. No category rows or existing expenses are removed.

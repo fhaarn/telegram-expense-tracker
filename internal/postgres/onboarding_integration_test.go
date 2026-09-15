@@ -73,7 +73,7 @@ func TestOnboardingIsolationAndRestart(t *testing.T) {
 		t.Fatalf("active users: %d %v", count, err)
 	}
 	for _, person := range []int64{101, 202} {
-		if err := pool.QueryRow(ctx, "SELECT count(*) FROM categories c JOIN users u ON u.id=c.user_id WHERE u.telegram_user_id=$1", person).Scan(&count); err != nil || count != 8 {
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM categories c JOIN users u ON u.id=c.user_id WHERE u.telegram_user_id=$1", person).Scan(&count); err != nil || count != len(user.StarterCategories) {
 			t.Fatalf("categories %d %v", count, err)
 		}
 	}

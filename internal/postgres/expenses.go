@@ -33,7 +33,7 @@ func loadDraft(ctx context.Context, tx pgx.Tx, uid, id int64) (expenseDraft, err
 	return d, err
 }
 func mapping(ctx context.Context, tx pgx.Tx, uid int64, key string) (cat, version int64, err error) {
-	err = tx.QueryRow(ctx, "SELECT category_id,version FROM category_mappings WHERE user_id=$1 AND description_key=$2", uid, key).Scan(&cat, &version)
+	err = tx.QueryRow(ctx, "SELECT m.category_id,m.version FROM category_mappings m JOIN categories c ON c.user_id=m.user_id AND c.id=m.category_id JOIN users u ON u.id=m.user_id WHERE m.user_id=$1 AND m.description_key=$2 AND (c.normalized_name <> 'smoking & vaping' OR u.is_smoker IS TRUE)", uid, key).Scan(&cat, &version)
 	if errors.Is(err, pgx.ErrNoRows) {
 		err = nil
 	}
@@ -58,7 +58,7 @@ func picker(ctx context.Context, tx pgx.Tx, uid int64, d expenseDraft, page int)
 	if page < 0 || page > 100000 {
 		page = 0
 	}
-	rows, err := tx.Query(ctx, "SELECT id,display_name FROM categories WHERE user_id=$1 ORDER BY id LIMIT 9 OFFSET $2", uid, page*8)
+	rows, err := tx.Query(ctx, "SELECT c.id,c.display_name FROM categories c JOIN users u ON u.id=c.user_id WHERE c.user_id=$1 AND (c.normalized_name <> 'smoking & vaping' OR u.is_smoker IS TRUE) ORDER BY c.id LIMIT 9 OFFSET $2", uid, page*8)
 	if err != nil {
 		return user.Reply{}, err
 	}
@@ -157,6 +157,15 @@ func HandleExpense(ctx context.Context, tx pgx.Tx, uid int64, name, timezone str
 			cname, e := user.NormalizeName(text)
 			if e != nil {
 				return reply("🤔 Use a category name with 1–40 characters on one line."), nil
+			}
+			if parser.Normalize(cname) == "smoking & vaping" {
+				var allowed bool
+				if e = tx.QueryRow(ctx, "SELECT is_smoker IS TRUE FROM users WHERE id=$1", uid).Scan(&allowed); e != nil {
+					return user.Reply{}, e
+				}
+				if !allowed {
+					return reply("🚬 Smoking & vaping is available only when your smoking preference is Yes."), nil
+				}
 			}
 			e = tx.QueryRow(ctx, `INSERT INTO categories(user_id,display_name,normalized_name) VALUES($1,$2,$3) ON CONFLICT(user_id,normalized_name) DO UPDATE SET normalized_name=excluded.normalized_name RETURNING id`, uid, cname, parser.Normalize(cname)).Scan(&d.Category)
 			if e != nil {
@@ -306,7 +315,7 @@ func expenseCallback(ctx context.Context, tx pgx.Tx, uid int64, data, today stri
 			return reply("🤔 Invalid category."), nil
 		}
 		var exists bool
-		if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM categories WHERE user_id=$1 AND id=$2)", uid, cat).Scan(&exists); err != nil {
+		if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM categories c JOIN users u ON u.id=c.user_id WHERE c.user_id=$1 AND c.id=$2 AND (c.normalized_name <> 'smoking & vaping' OR u.is_smoker IS TRUE))", uid, cat).Scan(&exists); err != nil {
 			return user.Reply{}, err
 		}
 		if !exists {
@@ -344,6 +353,13 @@ func expenseCallback(ctx context.Context, tx pgx.Tx, uid int64, data, today stri
 }
 func saveDraft(ctx context.Context, tx pgx.Tx, uid int64, d expenseDraft, today string) (user.Reply, error) {
 	if d.Category == 0 {
+		return picker(ctx, tx, uid, d, 0)
+	}
+	var allowed bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM categories c JOIN users u ON u.id=c.user_id WHERE c.user_id=$1 AND c.id=$2 AND (c.normalized_name <> 'smoking & vaping' OR u.is_smoker IS TRUE))`, uid, d.Category).Scan(&allowed); err != nil {
+		return user.Reply{}, err
+	}
+	if !allowed {
 		return picker(ctx, tx, uid, d, 0)
 	}
 	if d.Learn {

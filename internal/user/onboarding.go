@@ -34,7 +34,7 @@ type Decision struct {
 	Begin, Cancel, Activate bool
 }
 
-var StarterCategories = []string{"Food & drinks", "Transport", "Groceries", "Shopping", "Bills", "Entertainment", "Health", "Other"}
+var StarterCategories = []string{"Food & drinks", "Transport", "Groceries", "Shopping", "Bills", "Entertainment", "Health", "Other", "Coffee & drinks", "Smoking & vaping"}
 
 const Prompt = "👋 Hey! What should I call you?"
 const Help = `🧾 Expense tracker help

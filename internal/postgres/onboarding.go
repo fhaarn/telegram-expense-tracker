@@ -36,10 +36,11 @@ func (s *Onboarding) Accept(ctx context.Context, m user.Message) error {
 	}
 	var p user.Profile
 	var timezone string
+	var smoker *bool
 	err = tx.QueryRow(ctx, `INSERT INTO users(telegram_user_id,telegram_chat_id,telegram_username,timezone,currency)
  VALUES($1,$2,NULLIF($3,''),$4,$5) ON CONFLICT(telegram_user_id) DO UPDATE
  SET telegram_chat_id=excluded.telegram_chat_id,telegram_username=excluded.telegram_username,updated_at=now()
- RETURNING id,COALESCE(display_name,''),status='active',timezone`, m.TelegramID, m.ChatID, m.Username, s.Timezone, s.Currency).Scan(&p.ID, &p.Name, &p.Active, &timezone)
+ RETURNING id,COALESCE(display_name,''),status='active',timezone,is_smoker`, m.TelegramID, m.ChatID, m.Username, s.Timezone, s.Currency).Scan(&p.ID, &p.Name, &p.Active, &timezone, &smoker)
 	if err != nil {
 		return err
 	}
@@ -85,7 +86,23 @@ func (s *Onboarding) Accept(ctx context.Context, m user.Message) error {
 		if len(fields) > 0 {
 			command = strings.SplitN(fields[0], "@", 2)[0]
 		}
-		if strings.HasPrefix(m.Callback, "c:") || command == "/compare" || command == "/disconnect" || invite {
+		if m.Callback == "profile:smoker:yes" || m.Callback == "profile:smoker:no" {
+			if smoker != nil {
+				reply = user.Reply{Text: "👌 Your preference is already saved."}
+			} else {
+				_, err = tx.Exec(ctx, "UPDATE users SET is_smoker=$2,updated_at=now() WHERE id=$1 AND is_smoker IS NULL", p.ID, m.Callback == "profile:smoker:yes")
+				reply = user.Reply{Text: "✅ Preference saved!\nSend an expense like bensin 100k, or /help to see how to use the bot."}
+				if err == nil {
+					var pending user.Reply
+					pending, err = PendingInviteReply(ctx, tx, p.ID)
+					if pending.Text != "" {
+						reply = pending
+					}
+				}
+			}
+		} else if command == "/start" && !invite && smoker == nil {
+			reply = smokingQuestion()
+		} else if strings.HasPrefix(m.Callback, "c:") || command == "/compare" || command == "/disconnect" || invite {
 			reply, err = HandleComparison(ctx, tx, p.ID, p.Name, timezone, s.BotUsername, original)
 		} else if command != "/start" && command != "/help" {
 			reply, err = HandleExpense(ctx, tx, p.ID, p.Name, timezone, m)
@@ -121,14 +138,10 @@ func (s *Onboarding) Accept(ctx context.Context, m user.Message) error {
 		}
 	}
 	if decision.Activate {
-		pending, e := PendingInviteReply(ctx, tx, p.ID)
-		if e != nil {
-			return e
-		}
-		if pending.Text != "" {
-			reply = pending
-		}
+		reply = smokingQuestion()
+		reply.Text = "✅ Nice to meet you, " + decision.Name + "!\n\n" + reply.Text + "\n\n💡 Send /help to see the commands and how to use the bot."
 	}
+
 	if _, err = tx.Exec(ctx, "UPDATE inbound_updates SET user_id=$2 WHERE update_id=$1", m.UpdateID, p.ID); err != nil {
 		return err
 	}
@@ -140,4 +153,8 @@ func (s *Onboarding) Accept(ctx context.Context, m user.Message) error {
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+func smokingQuestion() user.Reply {
+	return user.Reply{Text: "🚬 Do you smoke or vape?", Buttons: [][]user.Button{{{Text: "Yes", Data: "profile:smoker:yes"}, {Text: "No", Data: "profile:smoker:no"}}}}
 }
