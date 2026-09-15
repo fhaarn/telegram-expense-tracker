@@ -58,7 +58,7 @@ func picker(ctx context.Context, tx pgx.Tx, uid int64, d expenseDraft, page int)
 	if page < 0 || page > 100000 {
 		page = 0
 	}
-	rows, err := tx.Query(ctx, "SELECT c.id,c.display_name FROM categories c JOIN users u ON u.id=c.user_id WHERE c.user_id=$1 AND (c.normalized_name <> 'smoking & vaping' OR u.is_smoker IS TRUE) ORDER BY c.id LIMIT 9 OFFSET $2", uid, page*8)
+	rows, err := tx.Query(ctx, "SELECT c.id,c.display_name FROM categories c JOIN users u ON u.id=c.user_id WHERE c.user_id=$1 AND (c.normalized_name <> 'smoking & vaping' OR u.is_smoker IS TRUE) ORDER BY CASE c.normalized_name WHEN 'food & drinks' THEN 1 WHEN 'food' THEN 1 WHEN 'coffee & drinks' THEN 2 WHEN 'smoking & vaping' THEN 3 WHEN 'transport' THEN 4 WHEN 'entertainment' THEN 5 WHEN 'shopping' THEN 6 WHEN 'groceries' THEN 7 WHEN 'bills' THEN 8 WHEN 'health' THEN 100 WHEN 'other' THEN 101 ELSE 9 END, c.id LIMIT 6 OFFSET $2", uid, page*5)
 	if err != nil {
 		return user.Reply{}, err
 	}
@@ -72,7 +72,7 @@ func picker(ctx context.Context, tx pgx.Tx, uid int64, d expenseDraft, page int)
 			return r, err
 		}
 		n++
-		if n <= 8 {
+		if n <= 5 {
 			r.Buttons = append(r.Buttons, []user.Button{eb(category.Label(name), "cat", d, strconv.FormatInt(id, 10))})
 		}
 	}
@@ -83,7 +83,7 @@ func picker(ctx context.Context, tx pgx.Tx, uid int64, d expenseDraft, page int)
 	if page > 0 {
 		nav = append(nav, eb("⬅️ Previous", "pick", d, strconv.Itoa(page-1)))
 	}
-	if n > 8 {
+	if n > 5 {
 		nav = append(nav, eb("Next ➡️", "pick", d, strconv.Itoa(page+1)))
 	}
 	if len(nav) > 0 {
