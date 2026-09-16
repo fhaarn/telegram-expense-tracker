@@ -14,12 +14,12 @@ The first release should be useful without AI: text entry, confirmation, correct
 Initial assumptions, configurable before implementation:
 
 - Multiple registered Telegram users, private chats only. Each user owns separate expenses, categories, mappings, and interactions.
-- Each user may have at most one active comparison partner. Onboarding and pairing are part of phase 1; screenshot OCR remains phase 2.
+- Each user may have at most one active comparison partner. Onboarding and pairing are part of phase 1; screenshot OCR remains phase 4.
 - Default currency: IDR. Default timezone: Asia/Jakarta.
 - One expense per message or image. Multiple transactions require separate submissions in the first release.
 - Every expense requires explicit confirmation before it affects totals.
 - One Go process on Render and one PostgreSQL database hosted on Neon. Local development uses PostgreSQL in Docker.
-- Text parsing uses the final amount token; phase 2 screenshots use local OCR and deterministic template mapping, starting with GoFood. No external AI API is required.
+- Text parsing uses the final amount token; phase 4 screenshots use local OCR and deterministic template mapping, starting with GoFood. No external AI API is required.
 
 Included: text and image input, user onboarding, draft review, corrections, confirmation, deletion, daily/monthly summaries, one-to-one partner comparisons, and later CSV export.
 
@@ -37,7 +37,7 @@ Use friendly, casual messages with one or two relevant emojis per message. Keep 
 | Category selection | 🏷️ What category is “bensin”? |
 | New category | ✨ What’s your new category called? |
 | Saved expense | ✅ Saved! Today’s spending: Rp125,000 |
-| Reading screenshot (phase 2) | 🧾 Reading your receipt… |
+| Reading screenshot (phase 4) | 🧾 Reading your receipt… |
 | Unknown amount | 🤔 I couldn’t find the amount. Try `Tahu Telor 20k` |
 | Invite created | 🤝 Spending is more fun with a partner. Share this invite! |
 | Partner joins | ⚔️ You’re battling {name} now! |
@@ -133,7 +133,7 @@ Partners see only aggregate totals and counts through the dedicated compare oper
 
 One Go application and one PostgreSQL database can serve multiple users; do not create a database or bot per person. Resolve the authenticated Telegram sender to an internal user ID and pass it explicitly to every expense/category/report operation. Scope every query and callback mutation by owner. Pairing authorizes a narrow aggregate read, never access to a partner's editing endpoints.
 
-Index expenses by `(owner_id, expense_date)` and enforce owner-consistent foreign keys. Apply bounded per-user input/invite limits and shared worker limits so one person cannot exhaust all processing capacity; choose numeric limits during implementation. A small group does not require microservices. Free-tier capacity remains a measured constraint: track latency, database compute/storage, and phase 2 OCR CPU/memory before admitting a larger audience.
+Index expenses by `(owner_id, expense_date)` and enforce owner-consistent foreign keys. Apply bounded per-user input/invite limits and shared worker limits so one person cannot exhaust all processing capacity; choose numeric limits during implementation. A small group does not require microservices. Free-tier capacity remains a measured constraint: track latency, database compute/storage, and phase 4 OCR CPU/memory before admitting a larger audience.
 
 ### Text entry
 
@@ -212,7 +212,7 @@ The bot learns an explicit mapping from a text description to the user's chosen 
 
 ### Screenshot entry
 
-Phase 2 starts with GoFood order/payment screenshots from supported layouts. The user sends a photo or supported image document. The bot downloads it, runs local OCR, maps recognized text through a GoFood template parser, and presents the same editable draft UI. Unknown layouts fall back to manual entry.
+Phase 4 starts with GoFood order/payment screenshots from supported layouts. The user sends a photo or supported image document. The bot downloads it, runs local OCR, maps recognized text through a GoFood template parser, and presents the same editable draft UI. Unknown layouts fall back to manual entry.
 
 Illustrative OCR text supplied by the user: `McDonalds Thursday 17 September Purchase Details Price 2000`. For a verified template where this Price field represents the final paid total, map merchant/description to `McDonalds`, amount to Rp2,000, and service to `gofood`. The date is separate from the description. This example is a design fixture, not a verified current GoFood layout.
 
@@ -377,9 +377,9 @@ Before implementing a template, inspect representative GoFood screenshots suppli
 
 Development: run the Go executable with PostgreSQL in Docker Compose. Use a separate development Telegram bot; local polling or a development HTTPS tunnel can be added when intake is implemented. The application exposes health endpoints and a secret-verified message/callback webhook. Use `make webhook-register` to configure an existing public HTTPS endpoint explicitly.
 
-Personal deployment: Render web service with Neon PostgreSQL and an HTTPS Telegram webhook. Render Free can sleep after inactivity and loses local file changes on restart/redeploy; keep all durable state in PostgreSQL. Incoming webhook requests can wake the app, but the first response can be delayed. Check provider quotas at setup; do not use an expiring free Render database for permanent history. Phase 2 OCR resource use must be measured before choosing the hosting tier.
+Personal deployment: Render web service with Neon PostgreSQL and an HTTPS Telegram webhook. Render Free can sleep after inactivity and loses local file changes on restart/redeploy; keep all durable state in PostgreSQL. Incoming webhook requests can wake the app, but the first response can be delayed. Check provider quotas at setup; do not use an expiring free Render database for permanent history. Phase 4 OCR resource use must be measured before choosing the hosting tier.
 
-Configuration: Telegram bot token, database URL, HTTP port, webhook secret, default currency, timezone, and, in phase 2, OCR paths/limits. Read secrets from environment; never commit or log them. Local commands automatically load an optional `.env` from the working directory without overriding existing variables; Render can supply all configuration directly without a file. Database-backed onboarding replaces TELEGRAM_ALLOWED_USER_ID. Comparison links require optional TELEGRAM_BOT_USERNAME configuration. Require verified TLS for remote PostgreSQL connections.
+Configuration: Telegram bot token, database URL, HTTP port, webhook secret, default currency, timezone, and, in phase 4, OCR paths/limits. Read secrets from environment; never commit or log them. Local commands automatically load an optional `.env` from the working directory without overriding existing variables; Render can supply all configuration directly without a file. Database-backed onboarding replaces TELEGRAM_ALLOWED_USER_ID. Comparison links require optional TELEGRAM_BOT_USERNAME configuration. Require verified TLS for remote PostgreSQL connections.
 
 Use a small PostgreSQL connection pool and bounded query/connection timeouts. Liveness health checks must not query the database repeatedly; expose a separate on-demand readiness endpoint. Avoid continuous aggressive background polling that keeps Neon compute awake. Durable job processing must recover after sleep/restart.
 
@@ -412,7 +412,45 @@ Custom-category acceptance: creating Fitness while entering `gym 150k` selects i
 
 Multi-user acceptance: register two independent users, preserve pending onboarding invites across restart, learn different categories for the same description, and verify private reports remain isolated. Redeem one random invite successfully, deliver the specified messages, and reject self/expired/reused/conflicting invitations. Concurrent acceptance must create only one pair. Verify comparison date boundaries, no-record messaging, notification recovery, and access revocation after disconnect.
 
-### Phase 2 — GoFood screenshots with local OCR
+### Phase 2 — Admin API and user access control
+
+Provide an API-key-protected HTTP API for the owner to list users and blacklist or whitelist individual users. This phase is an API only; no admin dashboard is required.
+
+Authentication: require `X-API-Key: <ADMIN_API_KEY>` on every `/admin/*` request over HTTPS. Store a separate random `ADMIN_API_KEY` in Render environment variables; do not reuse the Telegram token or webhook secret. Fail closed when the key is missing from server configuration, compare keys in constant time, and never log keys or return them in responses. Missing/invalid credentials return 401; disabled admin configuration returns 503. Apply bounded request sizes and admin request rate limits.
+
+| Method and path | Purpose | Request / response |
+| --- | --- | --- |
+| `GET /admin/users?limit=50&cursor=...&access=all` | List users, including pending and active users | Cursor-paginated `users` and `next_cursor`; limit 1–100; access filter `all`, `allowed`, or `blocked` |
+| `PUT /admin/users/{user_id}/blacklist` | Block an existing user | Optional JSON `reason` (maximum 500 characters); return user ID and `access_status` |
+| `PUT /admin/users/{user_id}/whitelist` | Restore access for an existing user | Optional JSON `reason`; return user ID and `access_status` |
+
+`user_id` is the internal users.id, returned by the list endpoint. Unknown users return 404, invalid input returns 400, and successful requests return 200. Repeated blacklist/whitelist requests are idempotent. Whitelist means “allow this user again”; registration remains open by default, rather than requiring every new user to be preapproved.
+
+List fields: internal ID, Telegram user ID, Telegram username, display name, onboarding status, access status, created_at, and access_updated_at. Do not include expense descriptions, amounts, smoking preference, secrets, or notification contents in this response.
+
+Planned schema:
+
+- `users.access_status`: TEXT, `allowed` or `blocked`, non-null and default `allowed`. Keep separate from onboarding `users.status` (`pending`/`active`). Backfill existing users as allowed.
+- `users.access_updated_at`: TIMESTAMPTZ, timestamp of the latest access change.
+- `admin_access_events`: ID, user_id FK, previous_status, new_status, optional reason, and created_at. Record actual state transitions atomically with the access update. The single admin key identifies the owner; never store its value in the audit row.
+
+Blocking behavior: enforce access status centrally before any bot command/callback changes state or exposes reports. Acknowledge valid Telegram deliveries normally to avoid retries; an optional bounded blocked-access reply may explain that access is unavailable. `/start` cannot clear the block. Preserve the user's profile, categories, drafts, and expenses. Revoke outstanding comparison invites, clear their pending invite, and end any active comparison connection atomically; suppress queued comparison/record notifications and other queued bot replies for the blocked recipient. Already in-flight messages may finish delivery. Whitelisting restores bot access but does not restore expired drafts, revoked invites, or ended partner connections.
+
+Use the existing transaction/locking discipline to serialize admin access transitions against expense saves and comparison acceptance. A blocked user cannot redeem an invite, receive a new connection, or bypass the restriction with an old button. Check delivery eligibility before claiming queued messages.
+
+Acceptance: correct API key can list paginated users, block a user, and restore access. Missing/invalid keys cannot list or mutate users. Validate filters, limits, IDs, and reasons. Verify repeated requests, concurrent admin/bot requests, blocked commands/callbacks, comparison cleanup, queued notification suppression, and unchanged expense history. Confirm logs never contain the API key. This is planned work; no admin routes or access-control schema are implemented by this HLD update.
+
+### Phase 3 — CSV export
+
+CSV export only. Google Sheets is an undecided idea outside the delivery phases; no Google credentials, spreadsheet linking, or sync infrastructure are required for this phase.
+
+The user requests a bounded date range, and the bot sends their confirmed, non-deleted expenses as a CSV attachment. Include expense ID, date, description, category, amount in rupiah, and currency. Scope every export to the requesting user, never their comparison partner.
+
+Use Go's encoding/csv, stream or page database reads, and cap range/output size and concurrent exports. Escape commas, quotes, and newlines correctly; neutralize formula-like user text for spreadsheet consumers. Generate on demand and clean up temporary files. CSV is a snapshot; later changes require another export. No Google credentials are needed.
+
+Acceptance: exports contain only the requesting user's records in the selected date range and reflect confirmed edits/deletions. Test empty results, date boundaries, Unicode, commas, quotes, newlines, formula-like text handling, output limits, attachment delivery, and temporary-file cleanup. Verify bounded resource use for large exports.
+
+### Phase 4 — GoFood screenshots with local OCR
 
 - Package Tesseract and language data with the service.
 - Local OCR adapter and versioned GoFood template parser based on actual sample screenshots.
@@ -423,9 +461,9 @@ Multi-user acceptance: register two independent users, preserve pending onboardi
 
 Acceptance: supported GoFood screenshots produce reviewable drafts with the correct restaurant and final paid amount using local OCR only. The illustrative McDonalds/2000 fixture maps correctly under its explicit template assumptions. Verify real anonymized fixtures including discounts, fees, competing prices, OCR errors, and unsupported layouts. Unclear totals require correction; OCR failures never change reported totals. Screenshot expenses appear in the existing phase 1 reports after confirmation.
 
-### Phase 3 — Convenience and operation
+### Phase 5 — Convenience and operation
 
-- CSV export, richer text/date parsing, duplicate-submission warnings.
+- Richer text/date parsing and duplicate-submission warnings (CSV export moved to phase 3).
 - Evaluate always-on paid hosting if free-tier wake-up delays become inconvenient.
 - Optional budgets and reminders only after the core workflow is reliable.
 
@@ -433,11 +471,21 @@ Acceptance: supported GoFood screenshots produce reviewable drafts with the corr
 
 - Confirm IDR and Asia/Jakarta defaults for all initial users.
 - Initial comparison policy: totals/counts only, from the connection local calendar date onward (including entries earlier that date); invitations expire after 24 hours. Changing that policy remains a product decision.
-- Before phase 2, collect representative GoFood screenshots and verify the initial layout, total labels, languages, and currency/date formats.
-- Verify Render/Neon quotas and regions at setup; benchmark OCR before selecting phase 2 compute.
+- Before phase 4, collect representative GoFood screenshots and verify the initial layout, total labels, languages, and currency/date formats.
+- Verify Render/Neon quotas and regions at setup; benchmark OCR before selecting phase 4 compute.
 - Decide whether screenshot retention is ever needed; initial design retains no originals.
 
 These decisions do not block the text-only implementation.
+
+### Undecided idea — Google Sheets integration
+
+Status: exploratory only, with no committed phase or implementation date. Phase 3 remains CSV-only. Revisit whether users need a linked spreadsheet after trying CSV exports.
+
+Possible experience: a user shares their own spreadsheet with a Google service account as Editor, then links it to the bot. The service account uses a generated address such as expendabot@PROJECT_ID.iam.gserviceaccount.com; a regular mailbox alone does not authenticate Sheets API requests.
+
+Open decisions: whether to build this at all, manual export versus automatic sync, linking/ownership verification, and how sheet edits should be handled. A potential design would keep PostgreSQL authoritative and use a dedicated bot-managed tab. Before implementation, resolve cross-user binding protection, secure credentials, sharing restrictions, quotas, retries without duplicate rows, expense edits/deletions, permission revocation, and disconnect behavior.
+
+References: [Google service-account credentials and document sharing](https://developers.google.com/workspace/guides/create-credentials), [Sheets API quotas](https://developers.google.com/workspace/sheets/api/limits).
 
 ## References
 
