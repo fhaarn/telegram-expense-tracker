@@ -21,7 +21,7 @@ Initial assumptions, configurable before implementation:
 - One Go process on Render and one PostgreSQL database hosted on Neon. Local development uses PostgreSQL in Docker.
 - Text parsing uses the final amount token; phase 4 screenshots use local OCR and deterministic template mapping, starting with GoFood. No external AI API is required.
 
-Included: text and image input, user onboarding, draft review, corrections, confirmation, deletion, daily/monthly summaries, one-to-one partner comparisons, and later CSV export.
+Included: text and image input, user onboarding, draft review, corrections, confirmation, deletion, daily/monthly summaries, one-to-one partner comparisons, and Excel export.
 
 Excluded initially: bank integrations, automatic transaction imports, budgeting, recurring expenses, split bills, group comparisons, multi-currency conversion, dashboards, and receipt line-item accounting.
 
@@ -232,7 +232,7 @@ GoFood drafts default to the editable category Food & drinks. Store GoFood as th
 | `/month` | Show this month's total and category breakdown |
 | `/recent` | Show recent expenses with record-specific edit/delete actions |
 | `/cancel` | Cancel the current field-edit interaction |
-| `/export` | Later: export confirmed expenses as CSV |
+| `/export` | Export confirmed expenses as XLSX with totals and a category pie chart |
 
 Deletion requires a confirmation button. Editing a saved expense produces a proposed revision; reports change only when that revision is confirmed.
 
@@ -440,15 +440,17 @@ Use the existing transaction/locking discipline to serialize admin access transi
 
 Acceptance: correct API key can list paginated users, block a user, and restore access. Missing/invalid keys cannot list or mutate users. Validate filters, limits, IDs, and reasons. Verify repeated requests, concurrent admin/bot requests, blocked commands/callbacks, comparison cleanup, queued notification suppression, and unchanged expense history. Confirm logs never contain the API key. Implemented in migration 007 and the Go admin HTTP/storage handlers. See [admin API operations](admin-api.md). Production key configuration and live verification remain pending.
 
-### Phase 3 — CSV export
+### Phase 3 — Formatted Excel export
 
-CSV export only. Google Sheets is an undecided idea outside the delivery phases; no Google credentials, spreadsheet linking, or sync infrastructure are required for this phase.
+XLSX replaces the earlier CSV proposal to support the user's requested layout and native pie chart. `/export` exports the current local calendar month. `/export YYYY-MM-DD YYYY-MM-DD` selects an inclusive date range, up to 366 days. Only the requesting active, allowed user's confirmed, non-deleted expenses are included. No expense ID, income, or remaining-balance column is shown.
 
-The user requests a bounded date range, and the bot sends their confirmed, non-deleted expenses as a CSV attachment. Include expense ID, date, description, category, amount in rupiah, and currency. Scope every export to the requesting user, never their comparison partner.
+The Expenses sheet contains Date, Category, Notes, and Amount, sorted by date and original expense ID. The date appears at the start of each date group. Colored category cells and numeric rupiah formatting follow the supplied reference. Total expenses and a percentage-labelled category pie chart appear on the right. The Categories sheet contains formula-based totals feeding the chart; when more than eight categories exist, the chart groups all but the seven largest as Remaining categories while retaining the complete breakdown in the supporting sheet. Workbook edits do not change bot records; download another export for up-to-date data.
 
-Use Go's encoding/csv, stream or page database reads, and cap range/output size and concurrent exports. Escape commas, quotes, and newlines correctly; neutralize formula-like user text for spreadsheet consumers. Generate on demand and clean up temporary files. CSV is a snapshot; later changes require another export. No Google credentials are needed.
+Go Excelize generates the XLSX. User text is stored as text cells, not formulas. Totals use formulas with cached values for previews, and the chart includes native source references and caches. Exports reject totals above 999,999,999,999,999 rupiah to preserve Excel numeric precision. Each report is limited to 2,000 expenses and 5 MB. Generated workbooks stay in memory; no persistent local export files are created.
 
-Acceptance: exports contain only the requesting user's records in the selected date range and reflect confirmed edits/deletions. Test empty results, date boundaries, Unicode, commas, quotes, newlines, formula-like text handling, output limits, attachment delivery, and temporary-file cleanup. Verify bounded resource use for large exports.
+Migration 008 adds `notification_outbox.export_payload` and `users.last_export_at`. The request transaction snapshots the selected rows and enqueues that JSON atomically with Telegram update deduplication. A user's exports are limited to one per five minutes and one pending export; at most 20 exports may be globally queued. The existing serial delivery worker generates and sends the XLSX outside the webhook transaction, using a 120-second claim lease and a 60-second send context. Retry/restart uses the same snapshot and filename. Payloads are cleared on delivery success, terminal failure, or admin suppression. An uncertain Telegram send outcome may result in a duplicate attachment after retry; exactly-once external delivery cannot be guaranteed.
+
+Acceptance: validate local month and inclusive date boundaries, isolated ownership, deleted/edited records, empty results, caps, duplicate updates, cooldown, queued snapshots across restarts, blocked-user cleanup, Unicode and formula-like text, recalculating totals, native chart structure, and multipart document upload. Render a sample workbook and inspect both sheets. Production download verification remains pending after deployment.
 
 ### Phase 4 — GoFood screenshots with local OCR
 
@@ -463,7 +465,7 @@ Acceptance: supported GoFood screenshots produce reviewable drafts with the corr
 
 ### Phase 5 — Convenience and operation
 
-- Richer text/date parsing and duplicate-submission warnings (CSV export moved to phase 3).
+- Richer text/date parsing and duplicate-submission warnings (XLSX export moved to phase 3).
 - Evaluate always-on paid hosting if free-tier wake-up delays become inconvenient.
 - Optional budgets and reminders only after the core workflow is reliable.
 
@@ -479,7 +481,7 @@ These decisions do not block the text-only implementation.
 
 ### Undecided idea — Google Sheets integration
 
-Status: exploratory only, with no committed phase or implementation date. Phase 3 remains CSV-only. Revisit whether users need a linked spreadsheet after trying CSV exports.
+Status: exploratory only, with no committed phase or implementation date. Phase 3 provides XLSX downloads only. Revisit whether users need a linked spreadsheet after trying Excel exports.
 
 Possible experience: a user shares their own spreadsheet with a Google service account as Editor, then links it to the bot. The service account uses a generated address such as expendabot@PROJECT_ID.iam.gserviceaccount.com; a regular mailbox alone does not authenticate Sheets API requests.
 

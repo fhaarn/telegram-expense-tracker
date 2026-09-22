@@ -214,7 +214,7 @@ func HandleExpense(ctx context.Context, tx pgx.Tx, uid int64, name, timezone str
 		return reply("👌 No active text entry. Use the Cancel button on a draft to discard it."), nil
 	}
 	if m.Image {
-		return reply("🧾 Screenshot reading is coming in phase 2."), nil
+		return reply("🧾 Screenshot reading is coming in phase 4."), nil
 	}
 	if strings.HasPrefix(text, "/") {
 		return reply("🤔 Try /today, /month, /recent, or send an expense like bensin 100k."), nil

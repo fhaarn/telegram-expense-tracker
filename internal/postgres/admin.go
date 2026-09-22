@@ -80,7 +80,7 @@ func (a Admin) SetAccess(ctx context.Context, id int64, status, reason string) e
 		if _, err = tx.Exec(ctx, `DELETE FROM active_pair_members WHERE pair_id IN (SELECT pair_id FROM active_pair_members WHERE user_id=$1)`, id); err != nil {
 			return err
 		}
-		if _, err = tx.Exec(ctx, `UPDATE notification_outbox n SET status='failed',body='',reply_markup='[]',lease_until=NULL WHERE status IN ('pending','sending') AND (user_id=$1 OR (pair_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM active_pair_members m WHERE m.user_id=n.user_id AND m.pair_id=n.pair_id)))`, id); err != nil {
+		if _, err = tx.Exec(ctx, `UPDATE notification_outbox n SET status='failed',body='',reply_markup='[]',export_payload=NULL,lease_until=NULL WHERE status IN ('pending','sending') AND (user_id=$1 OR (pair_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM active_pair_members m WHERE m.user_id=n.user_id AND m.pair_id=n.pair_id)))`, id); err != nil {
 			return err
 		}
 	}

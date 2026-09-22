@@ -1,10 +1,14 @@
 package telegram
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	"log/slog"
+	report "telegram-expense-tracker/internal/export"
 	"telegram-expense-tracker/internal/postgres"
 	"telegram-expense-tracker/internal/user"
 	"time"
@@ -49,9 +53,23 @@ func RunDelivery(ctx context.Context, o postgres.Outbox, s Sender, wake <-chan s
 		d, found, err := o.Claim(queryCtx)
 		cancel()
 		if err == nil && found {
-			sendCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			sendCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 			var sendErr error
-			if rich, ok := s.(keyboardSender); ok {
+			if len(d.ExportPayload) > 0 {
+				var r report.Report
+				sendErr = json.Unmarshal(d.ExportPayload, &r)
+				if sendErr == nil {
+					var data []byte
+					data, sendErr = report.Build(r)
+					if sendErr == nil {
+						if sender, ok := s.(documentSender); ok {
+							sendErr = sender.SendDocument(sendCtx, d.ChatID, r.Filename(), d.Body, data)
+						} else {
+							sendErr = errors.New("document sender unavailable")
+						}
+					}
+				}
+			} else if rich, ok := s.(keyboardSender); ok {
 				sendErr = rich.SendButtons(sendCtx, d.ChatID, d.Body, d.Buttons)
 			} else {
 				sendErr = s.Send(sendCtx, d.ChatID, d.Body)
@@ -97,4 +115,13 @@ func RunDelivery(ctx context.Context, o postgres.Outbox, s Sender, wake <-chan s
 		case <-timer.C:
 		}
 	}
+}
+
+type documentSender interface {
+	SendDocument(context.Context, int64, string, string, []byte) error
+}
+
+func (s BotSender) SendDocument(ctx context.Context, chatID int64, filename, caption string, data []byte) error {
+	_, err := s.Bot.SendDocument(ctx, &bot.SendDocumentParams{ChatID: chatID, Document: &models.InputFileUpload{Filename: filename, Data: bytes.NewReader(data)}, Caption: caption})
+	return err
 }

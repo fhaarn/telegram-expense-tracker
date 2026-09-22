@@ -18,6 +18,7 @@ type Button struct {
 	Data string `json:"callback_data"`
 }
 type Reply struct {
+	ExportPayload  []byte
 	SavedExpenseID int64 // Internal marker for a newly saved expense; never set for edits.
 	PairID         int64
 	Text           string
@@ -47,6 +48,8 @@ const Help = `🧾 Expense tracker help
 📋 Commands
 • /today — Today's expenses and category totals
 • /month — This month's total and category breakdown
+• /export — Excel report for this month
+• /export YYYY-MM-DD YYYY-MM-DD — Excel report for a date range
 • /recent — List expenses with Edit and Delete buttons
 • /compare — Invite a partner or view your comparison
 • /disconnect — Disconnect from your partner
@@ -113,7 +116,7 @@ func Respond(p Profile, m Message) Decision {
 		return Decision{Name: name, Activate: true, Reply: "✅ Nice to meet you, " + name + "!\nSend your first expense, like bensin 100k.\n\n💡 Send /help to see the commands and how to use the bot."}
 	}
 	if m.Image {
-		return Decision{Reply: "🧾 Screenshot reading is coming in phase 2."}
+		return Decision{Reply: "🧾 Screenshot reading is coming in phase 4."}
 	}
 	return Decision{Reply: "🚧 Expense tracking is coming next. Your profile is saved!"}
 }

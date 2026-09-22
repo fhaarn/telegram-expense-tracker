@@ -52,3 +52,8 @@ The utilities were rehearsed against disposable PostgreSQL 17 databases with a s
 
 
 Admin API (phase 2): configure a separate `ADMIN_API_KEY` in Render to enable user listing and blacklist/whitelist. Unset disables admin routes while the bot stays available. See [admin API setup and operations](admin-api.md) for requests, access behavior, key rotation, and rollout checks.
+
+
+### Excel exports
+
+Export snapshots are temporarily persisted in `notification_outbox.export_payload`, then cleared on success, terminal failure, or blacklist suppression. Treat pending payloads/backups as private expense data. Existing worker startup recovery handles queued exports. Generation is serial, with no permanent local files. Document sends have a 60-second context and claims have a 120-second lease. An uncertain Telegram response can cause a duplicate file on retry. If delivery repeatedly fails, inspect sanitized delivery IDs/attempt counts, not payload contents. No new deployment secret is needed.

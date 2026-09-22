@@ -79,7 +79,7 @@ in one PostgreSQL transaction before HTTP 200. Failures return 503 for Telegram 
 retry. The synchronous Phase 1 flow has no separate unfinished input job: it either
 commits fully or rolls back. Raw Telegram payloads are not retained.
 
-Replies use a durable outbox, per-user ordering, 30-second leases, and up to five
+Replies use a durable outbox, per-user ordering, 120-second leases, and up to five
 attempts with backoff. Startup resumes unsent replies. The worker sleeps without
 querying the database when idle and wakes on incoming updates. If multiple app
 instances are later introduced, add cross-instance wakeup/coordination. Hosting sleep
@@ -154,3 +154,10 @@ Weekly record baselines are cached in `weekly_category_records` (migration 005, 
 
 
 Admin API (phase 2): configure a separate `ADMIN_API_KEY` in Render to enable user listing and blacklist/whitelist. Unset disables admin routes while the bot stays available. See [admin API setup and operations](docs/admin-api.md) for requests, access behavior, key rotation, and rollout checks.
+
+
+### Excel export
+
+Send `/export` for this month's report, or `/export 2026-09-01 2026-09-30` for an inclusive date range. The bot sends an XLSX with date-grouped expenses, total spending, and a category pie chart. There is no expense ID or income section. Category totals are on the supporting Categories sheet.
+
+Limits: 366 days, 2,000 expenses, 5 MB, one request every five minutes, one queued report per user, and 20 queued reports globally. Each report is a snapshot at request time. Edits in Excel do not sync back; request a new export for updated bot data. Data is isolated to the requester; blocked users cannot export. The existing delivery worker handles XLSX attachments and retries. No new environment variables or external services are required; migration 008 runs at startup.

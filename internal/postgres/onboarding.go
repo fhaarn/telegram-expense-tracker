@@ -115,6 +115,8 @@ func (s *Onboarding) Accept(ctx context.Context, m user.Message) error {
 			reply = smokingQuestion()
 		} else if strings.HasPrefix(m.Callback, "c:") || command == "/compare" || command == "/disconnect" || invite {
 			reply, err = HandleComparison(ctx, tx, p.ID, p.Name, timezone, s.BotUsername, original)
+		} else if command == "/export" {
+			reply, err = exportExpenses(ctx, tx, p.ID, m.Text, timezone)
 		} else if command != "/start" && command != "/help" {
 			reply, err = HandleExpense(ctx, tx, p.ID, p.Name, timezone, m)
 		}
@@ -160,7 +162,7 @@ func (s *Onboarding) Accept(ctx context.Context, m user.Message) error {
 	if e != nil {
 		return e
 	}
-	if _, err = tx.Exec(ctx, "INSERT INTO notification_outbox(update_id,user_id,chat_id,body,reply_markup,pair_id) VALUES($1,$2,$3,$4,$5,NULLIF($6,0))", m.UpdateID, p.ID, m.ChatID, reply.Text, markup, reply.PairID); err != nil {
+	if _, err = tx.Exec(ctx, "INSERT INTO notification_outbox(update_id,user_id,chat_id,body,reply_markup,pair_id,export_payload) VALUES($1,$2,$3,$4,$5,NULLIF($6,0),$7)", m.UpdateID, p.ID, m.ChatID, reply.Text, markup, reply.PairID, reply.ExportPayload); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
