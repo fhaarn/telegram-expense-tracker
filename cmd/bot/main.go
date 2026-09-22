@@ -56,7 +56,7 @@ func run(logger *slog.Logger) error {
 		}
 	}
 	store := &postgres.Onboarding{Pool: pool, Timezone: cfg.Timezone.String(), Currency: cfg.Currency, BotUsername: cfg.BotUsername}
-	server := httpserver.New(cfg.Port, pool, telegram.Webhook(cfg.WebhookSecret, store, notify))
+	server := httpserver.New(cfg.Port, pool, telegram.Webhook(cfg.WebhookSecret, store, notify), httpserver.AdminHandler(cfg.AdminAPIKey, postgres.Admin{Pool: pool}))
 	workerCtx, stopWorker := context.WithCancel(context.Background())
 	workerDone := make(chan struct{})
 	go func() {

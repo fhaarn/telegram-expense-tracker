@@ -47,7 +47,7 @@ func PendingInviteReply(ctx context.Context, tx pgx.Tx, userID int64) (user.Repl
 	}
 	var id, creator int64
 	var name string
-	err := tx.QueryRow(ctx, `SELECT i.id,i.creator_id,u.display_name FROM users me JOIN comparison_invites i ON i.token_hash=me.pending_comparison_hash JOIN users u ON u.id=i.creator_id WHERE me.id=$1 AND i.state='pending' AND i.expires_at>now()`, userID).Scan(&id, &creator, &name)
+	err := tx.QueryRow(ctx, `SELECT i.id,i.creator_id,u.display_name FROM users me JOIN comparison_invites i ON i.token_hash=me.pending_comparison_hash JOIN users u ON u.id=i.creator_id WHERE me.id=$1 AND i.state='pending' AND i.expires_at>now() AND u.access_status='allowed'`, userID).Scan(&id, &creator, &name)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return user.Reply{Text: "🤔 This invite is invalid, expired, or no longer available."}, nil
 	}
@@ -159,7 +159,7 @@ func acceptComparison(ctx context.Context, tx pgx.Tx, userID int64, name string,
 	}
 	var creator int64
 	var creatorName string
-	err := tx.QueryRow(ctx, `SELECT i.creator_id,u.display_name FROM comparison_invites i JOIN users u ON u.id=i.creator_id JOIN users me ON me.id=$2 AND me.pending_comparison_hash=i.token_hash WHERE i.id=$1 AND i.state='pending' AND i.expires_at>now() AND u.status='active' AND me.status='active' FOR UPDATE OF i`, inviteID, userID).Scan(&creator, &creatorName)
+	err := tx.QueryRow(ctx, `SELECT i.creator_id,u.display_name FROM comparison_invites i JOIN users u ON u.id=i.creator_id JOIN users me ON me.id=$2 AND me.pending_comparison_hash=i.token_hash WHERE i.id=$1 AND i.state='pending' AND i.expires_at>now() AND u.access_status='allowed' AND u.status='active' AND me.status='active' AND me.access_status='allowed' FOR UPDATE OF i`, inviteID, userID).Scan(&creator, &creatorName)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return user.Reply{Text: "🤔 This invite is no longer available. Use /compare to see your current connection."}, nil
 	}

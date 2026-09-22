@@ -50,3 +50,6 @@ measured separately in phase 2. Back up PostgreSQL and rehearse restoration usin
 References: [Render deploy API](https://api-docs.render.com/reference/create-deploy),
 [deployment status](https://api-docs.render.com/reference/retrieve-deploy),
 [Render deployment settings](https://render.com/docs/deploys).
+
+
+Admin API (phase 2): configure a separate `ADMIN_API_KEY` in Render to enable user listing and blacklist/whitelist. Unset disables admin routes while the bot stays available. See [admin API setup and operations](admin-api.md) for requests, access behavior, key rotation, and rollout checks.

@@ -28,6 +28,9 @@ func Handler(db Pinger, webhook ...http.Handler) http.Handler {
 	if len(webhook) > 0 {
 		mux.Handle("POST /telegram/webhook", webhook[0])
 	}
+	if len(webhook) > 1 {
+		mux.Handle("/admin/", webhook[1])
+	}
 	return mux
 }
 

@@ -49,3 +49,6 @@ actual off-host backup storage, scheduling, and production recovery drills remai
 ## Repository verification
 
 The utilities were rehearsed against disposable PostgreSQL 17 databases with a synthetic record. The archive was restored into a separate empty database and the restored value was verified. This does not configure production storage or a scheduled backup.
+
+
+Admin API (phase 2): configure a separate `ADMIN_API_KEY` in Render to enable user listing and blacklist/whitelist. Unset disables admin routes while the bot stays available. See [admin API setup and operations](admin-api.md) for requests, access behavior, key rotation, and rollout checks.

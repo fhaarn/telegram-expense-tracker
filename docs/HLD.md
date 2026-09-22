@@ -438,7 +438,7 @@ Blocking behavior: enforce access status centrally before any bot command/callba
 
 Use the existing transaction/locking discipline to serialize admin access transitions against expense saves and comparison acceptance. A blocked user cannot redeem an invite, receive a new connection, or bypass the restriction with an old button. Check delivery eligibility before claiming queued messages.
 
-Acceptance: correct API key can list paginated users, block a user, and restore access. Missing/invalid keys cannot list or mutate users. Validate filters, limits, IDs, and reasons. Verify repeated requests, concurrent admin/bot requests, blocked commands/callbacks, comparison cleanup, queued notification suppression, and unchanged expense history. Confirm logs never contain the API key. This is planned work; no admin routes or access-control schema are implemented by this HLD update.
+Acceptance: correct API key can list paginated users, block a user, and restore access. Missing/invalid keys cannot list or mutate users. Validate filters, limits, IDs, and reasons. Verify repeated requests, concurrent admin/bot requests, blocked commands/callbacks, comparison cleanup, queued notification suppression, and unchanged expense history. Confirm logs never contain the API key. Implemented in migration 007 and the Go admin HTTP/storage handlers. See [admin API operations](admin-api.md). Production key configuration and live verification remain pending.
 
 ### Phase 3 — CSV export
 
@@ -557,3 +557,8 @@ Migration 006 adds nullable `users.is_smoker`: null means unanswered, true means
 After name entry, show “🚬 Do you smoke or vape?” with Yes/No buttons and a /help hint. No coffee announcement is sent. Existing users with a null preference receive the question on /start. The first answer is persisted; replayed or stale buttons cannot overwrite it. A pending comparison invitation resumes after the answer, preserving explicit partner consent.
 
 Coffee & drinks is visible to everyone. Smoking & vaping appears in category pickers and automatic mappings only for Yes users. Server-side selection and Save validation also enforce the preference, including manually entered category names. Reports retain all historical expenses regardless of preference. The preference is not shared with comparison partners. No category rows or existing expenses are removed.
+
+
+### Phase 2 implementation limits
+
+Admin requests use a process-local authenticated limit of 60/minute, a five-second operation timeout, and a 4096-byte body limit. Invalid keys are rejected before storage access. Missing configuration disables admin routes with 503. Delivery claims serialize with intake/admin transactions; messages claimed before a block can already be in flight. No automatic admin message is sent to blocked users. Migration 007 and the admin API are implemented; configuring the production key and verifying a deployed test-user flow remain external rollout tasks.

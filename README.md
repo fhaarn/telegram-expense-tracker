@@ -151,3 +151,6 @@ explicitly enabled in repository settings. The module name remains
 Weekly records: connected partners receive emoji alerts when a newly saved expense beats the week's largest single expense in the same category across the pair. Weeks run Monday–Sunday (default Asia/Jakarta), counting from the connection date. The first entry is quiet; ties, edits, and deletions do not send alerts. Partner alerts share the category and amount, never the description. Categories match by normalized name. Historical weeks and future-dated expenses do not trigger alerts.
 
 Weekly record baselines are cached in `weekly_category_records` (migration 005, applied at startup). Ordinary saves use a keyed lookup; missing/date-stale baselines and corrections are rebuilt from expenses. No reset job is required.
+
+
+Admin API (phase 2): configure a separate `ADMIN_API_KEY` in Render to enable user listing and blacklist/whitelist. Unset disables admin routes while the bot stays available. See [admin API setup and operations](docs/admin-api.md) for requests, access behavior, key rotation, and rollout checks.

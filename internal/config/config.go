@@ -11,6 +11,7 @@ import (
 )
 
 type Config struct {
+	AdminAPIKey   string
 	Port          string
 	DatabaseURL   string
 	BotToken      string
@@ -21,7 +22,7 @@ type Config struct {
 }
 
 func Load(getenv func(string) string) (Config, error) {
-	c := Config{BotUsername: strings.TrimPrefix(getenv("TELEGRAM_BOT_USERNAME"), "@"), Port: getenv("PORT"), DatabaseURL: getenv("DATABASE_URL"), BotToken: getenv("TELEGRAM_BOT_TOKEN"), WebhookSecret: getenv("TELEGRAM_WEBHOOK_SECRET"), Currency: getenv("DEFAULT_CURRENCY")}
+	c := Config{AdminAPIKey: getenv("ADMIN_API_KEY"), BotUsername: strings.TrimPrefix(getenv("TELEGRAM_BOT_USERNAME"), "@"), Port: getenv("PORT"), DatabaseURL: getenv("DATABASE_URL"), BotToken: getenv("TELEGRAM_BOT_TOKEN"), WebhookSecret: getenv("TELEGRAM_WEBHOOK_SECRET"), Currency: getenv("DEFAULT_CURRENCY")}
 	for _, r := range c.BotUsername {
 		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_') {
 			return Config{}, fmt.Errorf("TELEGRAM_BOT_USERNAME must be a Telegram username")

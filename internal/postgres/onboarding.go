@@ -34,6 +34,17 @@ func (s *Onboarding) Accept(ctx context.Context, m user.Message) error {
 	if result.RowsAffected() == 0 {
 		return tx.Commit(ctx)
 	}
+	// Check before the profile upsert so blocked updates cannot alter metadata.
+	var blocked bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE telegram_user_id=$1 AND access_status='blocked')`, m.TelegramID).Scan(&blocked); err != nil {
+		return err
+	}
+	if blocked {
+		if _, err = tx.Exec(ctx, `UPDATE inbound_updates SET user_id=(SELECT id FROM users WHERE telegram_user_id=$2) WHERE update_id=$1`, m.UpdateID, m.TelegramID); err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
+	}
 	var p user.Profile
 	var timezone string
 	var smoker *bool

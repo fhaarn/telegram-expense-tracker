@@ -21,21 +21,32 @@ type Delivery struct {
 func (o Outbox) Claim(ctx context.Context) (Delivery, bool, error) {
 	var d Delivery
 	var markup []byte
-	if _, err := o.Pool.Exec(ctx, `UPDATE notification_outbox n SET status='failed',body='',reply_markup='[]' WHERE n.status IN ('pending','sending') AND n.pair_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM active_pair_members a WHERE a.pair_id=n.pair_id AND a.user_id=n.user_id)`); err != nil {
+	tx, err := o.Pool.Begin(ctx)
+	if err != nil {
 		return d, false, err
 	}
-	err := o.Pool.QueryRow(ctx, `WITH candidate AS (
- SELECT n.id FROM notification_outbox n WHERE
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(7312041)`); err != nil {
+		return d, false, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE notification_outbox n SET status='failed',body='',reply_markup='[]' WHERE n.status IN ('pending','sending') AND (EXISTS(SELECT 1 FROM users u WHERE u.id=n.user_id AND u.access_status='blocked') OR (n.pair_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM active_pair_members a WHERE a.pair_id=n.pair_id AND a.user_id=n.user_id)))`); err != nil {
+		return d, false, err
+	}
+	err = tx.QueryRow(ctx, `WITH candidate AS (
+ SELECT n.id FROM notification_outbox n WHERE EXISTS(SELECT 1 FROM users u WHERE u.id=n.user_id AND u.access_status='allowed') AND
  ((n.status='pending' AND n.available_at<=now()) OR (n.status='sending' AND n.lease_until<=now()))
  AND NOT EXISTS(SELECT 1 FROM notification_outbox earlier WHERE earlier.user_id=n.user_id AND earlier.id<n.id AND earlier.status IN ('pending','sending'))
  ORDER BY n.id FOR UPDATE SKIP LOCKED LIMIT 1)
  UPDATE notification_outbox n SET status='sending',attempts=attempts+1,lease_until=now()+interval '30 seconds'
  FROM candidate c WHERE n.id=c.id RETURNING n.id,n.chat_id,n.body,n.attempts,n.reply_markup`).Scan(&d.ID, &d.ChatID, &d.Body, &d.Attempts, &markup)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return d, false, nil
+		return d, false, tx.Commit(ctx)
 	}
 	if err == nil {
 		err = json.Unmarshal(markup, &d.Buttons)
+	}
+	if err == nil {
+		err = tx.Commit(ctx)
 	}
 	return d, err == nil, err
 }
