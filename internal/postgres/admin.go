@@ -68,6 +68,18 @@ func (a Admin) SetAccess(ctx context.Context, id int64, status, reason string) e
 		return err
 	}
 	if status == "blocked" {
+		if _, err = tx.Exec(ctx, `UPDATE expense_drafts SET status='cancelled',version=version+1 WHERE user_id=$1 AND status='pending'`, id); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `DELETE FROM user_interactions WHERE user_id=$1`, id); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `UPDATE expense_batches SET status='cancelled',version=version+1 WHERE user_id=$1 AND status='pending'`, id); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `UPDATE admin_broadcast_recipients SET status='skipped',failure_code='access_revoked',lease_until=NULL WHERE user_id=$1 AND status IN ('pending','sending')`, id); err != nil {
+			return err
+		}
 		if _, err = tx.Exec(ctx, `UPDATE comparison_invites SET state='revoked' WHERE creator_id=$1 AND state='pending'`, id); err != nil {
 			return err
 		}

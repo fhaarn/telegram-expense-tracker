@@ -55,15 +55,27 @@ func run(logger *slog.Logger) error {
 		default:
 		}
 	}
+	broadcastWake := make(chan struct{}, 1)
+	notifyBroadcast := func() {
+		select {
+		case broadcastWake <- struct{}{}:
+		default:
+		}
+	}
 	store := &postgres.Onboarding{Pool: pool, Timezone: cfg.Timezone.String(), Currency: cfg.Currency, BotUsername: cfg.BotUsername}
-	server := httpserver.New(cfg.Port, pool, telegram.Webhook(cfg.WebhookSecret, store, notify), httpserver.AdminHandler(cfg.AdminAPIKey, postgres.Admin{Pool: pool}))
+	server := httpserver.New(cfg.Port, pool, telegram.Webhook(cfg.WebhookSecret, store, notify), httpserver.AdminHandler(cfg.AdminAPIKey, postgres.Admin{Pool: pool}, notifyBroadcast))
 	workerCtx, stopWorker := context.WithCancel(context.Background())
 	workerDone := make(chan struct{})
 	go func() {
 		defer close(workerDone)
 		telegram.RunDelivery(workerCtx, postgres.Outbox{Pool: pool}, telegram.BotSender{Bot: client}, wake, logger)
 	}()
-	defer func() { stopWorker(); <-workerDone }()
+	broadcastDone := make(chan struct{})
+	go func() {
+		defer close(broadcastDone)
+		telegram.RunBroadcasts(workerCtx, postgres.BroadcastQueue{Pool: pool}, telegram.BotSender{Bot: client}, broadcastWake, logger)
+	}()
+	defer func() { stopWorker(); <-workerDone; <-broadcastDone }()
 	failures := make(chan error, 1)
 	go func() { failures <- server.ListenAndServe() }()
 	logger.Info("HTTP server starting", "port", cfg.Port, "feature", "phase 1 expense tracker")

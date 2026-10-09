@@ -44,8 +44,11 @@ const Help = `🧾 Expense tracker help
 • Send a description with the amount at the end.
 • Example: bensin 100k
 • Example: Nice 8 Ball Cafe 100k
+• Add 2–20 expenses in one message, one per line.
+• I’ll ask for missing categories, then a date for the batch.
 
 📋 Commands
+• /bulk — Resume a batch or see bulk-entry instructions
 • /today — Today's expenses and category totals
 • /month — This month's total and category breakdown
 • /export — Excel report for this month

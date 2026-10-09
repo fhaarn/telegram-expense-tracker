@@ -101,6 +101,9 @@ func HandleExpense(ctx context.Context, tx pgx.Tx, uid int64, name, timezone str
 	}
 	today := time.Now().In(loc).Format("2006-01-02")
 	text := strings.TrimSpace(m.Text)
+	if r, handled, e := handleBatch(ctx, tx, uid, m, timezone, today); handled {
+		return r, e
+	}
 	if m.Callback != "" {
 		r, err := expenseCallback(ctx, tx, uid, m.Callback, today)
 		if err != nil || r.SavedExpenseID == 0 {
@@ -264,6 +267,13 @@ func expenseCallback(ctx context.Context, tx pgx.Tx, uid int64, data, today stri
 	}
 	if action == "revise" || action == "delete" || action == "remove" {
 		return savedCallback(ctx, tx, uid, action, id, version, today)
+	}
+	var batchItem bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM expense_batch_items WHERE user_id=$1 AND draft_id=$2)`, uid, id).Scan(&batchItem); err != nil {
+		return user.Reply{}, err
+	}
+	if batchItem {
+		return reply("🧾 This item belongs to a batch. Send /bulk to resume it."), nil
 	}
 	d, err := loadDraft(ctx, tx, uid, id)
 	if errors.Is(err, pgx.ErrNoRows) {

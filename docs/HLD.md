@@ -469,6 +469,51 @@ Acceptance: supported GoFood screenshots produce reviewable drafts with the corr
 - Evaluate always-on paid hosting if free-tier wake-up delays become inconvenient.
 - Optional budgets and reminders only after the core workflow is reliable.
 
+### Phase 6 — Bulk expense entry and admin announcements
+
+Status: implemented in migration 009 and the Go batch/admin/worker handlers. Both features belong to this phase; existing phases retain their numbers. See [Phase 6 tasks](phase-6-task.md) and [interaction and implementation report](phase-6-report.md). Production verification remains pending deployment.
+
+#### Bulk entry in one Telegram message
+
+A message with two or more non-empty lines starts a bulk expense draft, initially limited to 20 items. Parse each line independently using the existing final-token amount rule, so `Nice 8 Ball Cafe 100k` keeps the number in its description. For example:
+
+```text
+item a 20k
+item b 35k
+```
+
+The conversation proceeds as follows:
+
+1. Validate every line before categorization. Identify invalid lines by line number and let the user correct them. Nothing is recorded while errors remain.
+2. Reuse the user's remembered description-to-category mappings. Ask sequentially only for unknown descriptions, with existing category pagination, custom-category creation, and smoking-category visibility rules. Repeated unknown descriptions in the batch need one category choice, applied to matching items.
+3. After every item has a category, ask for the expense date: Today, Yesterday, or a custom `YYYY-MM-DD` date. The initial version applies one date to the entire batch, interpreted in the user's configured timezone; users submit separate batches for different dates. Reuse existing single-expense date validation.
+4. Show a review with all descriptions, amounts, categories, the shared date, and the batch total (five items per page to stay within Telegram message limits). Offer Save all, Edit, and Cancel. Editing an item can change its description, amount, or category; changing the batch date applies to all items.
+5. Save all confirmed expenses and learned category mappings in one transaction. Category edits apply to all matching descriptions in the batch. Learn previously unknown descriptions only; do not overwrite existing or newly changed remembered mappings. Custom category definitions themselves persist even if the batch is cancelled. Only then show the success message and total. Cancel or expiry creates no expenses or learned mappings.
+
+Persist the batch and its items in PostgreSQL so the flow survives restarts. Tables are `expense_batches` (owner, conversation stage, selected date, selected item, version, expiry, completion state) and `expense_batch_items` (batch, owner, line order, draft ID). Each item references an existing `expense_drafts` row for its description, normalized description, amount, category and mapping metadata, preserving the existing expense provenance foreign key. Confirmed transactions continue to use the existing expenses table. Prevent a new single/bulk draft from silently replacing an unfinished interaction; offer resume or explicit cancellation. Owner checks and draft versions reject stale or cross-user callbacks. Telegram update deduplication and an atomic batch completion transition prevent Save all retries from inserting duplicates.
+
+Reports, exports, and comparison totals include saved items normally. Update weekly record caches within the save transaction. Coalesce eligible current-week record notifications to the final winning item per category for the batch, retaining existing first-record/tie behavior; historical backfills do not produce current-week record announcements. Recheck access and category eligibility when saving, and cancel pending batches when the admin blocks their owner.
+
+Acceptance: mixed known/unknown categories, repeated descriptions, numbers inside descriptions, malformed/empty lines, item limits, custom categories, smoker visibility, date boundaries, edit/cancel, expiry/restart recovery, blocked users, stale callbacks, ownership isolation, atomic rollback, duplicate updates/confirmation, and correct report/export/weekly-cache results. No expense becomes visible before Save all succeeds.
+
+#### Admin announcement API
+
+Add an authenticated API for sending a feature announcement to all active, allowed bot users. This is an explicit admin action; deploying a feature does not itself send an announcement.
+
+Implemented API:
+
+- `POST /admin/broadcasts` accepts `{ "message": "New feature announcement", "dry_run": true }` to validate the message and return the eligible recipient count without sending or creating a delivery job.
+- The same endpoint with `dry_run: false` and a required `Idempotency-Key` header snapshots eligible recipient IDs, persists the job, and returns `202 Accepted` with a broadcast ID and status URL. Repeating the key with the same payload returns the original job; different payloads with that key are rejected.
+- `GET /admin/broadcasts/{id}` returns job state and recipient counts: pending, sent, failed, and skipped. The admin can monitor progress without keeping the submission request open.
+
+Use the existing `ADMIN_API_KEY` through `X-API-Key`, including constant-time verification and admin request rate limits. Accept non-empty plain text up to 4,000 UTF-16 units (emoji can count as two); no Telegram formatting mode or attachments in this phase. This is conservative relative to Telegram’s [1–4096-character sendMessage limit](https://core.telegram.org/bots/api#sendmessage). Broadcast request bodies have a separate 32 KiB cap to accommodate Unicode and escaped JSON; existing user mutation requests keep the 4 KiB cap. Do not log API keys or message bodies.
+
+Use dedicated durable `admin_broadcasts` and `admin_broadcast_recipients` tables. Store the message, unique idempotency key, and creation timestamp on the job; compare the stored message exactly on retries. Store user ID, delivery state, attempts, next retry, lease, and sanitized failure code per recipient. Derive job state and progress from recipient rows instead of maintaining duplicate counters. `broadcast_delivery_state` holds the shared next-send time and Telegram cooldown. A unique broadcast/user constraint prevents duplicate queue entries. Do not fabricate an incoming Telegram update ID to reuse the existing update-linked notification outbox.
+
+A bounded background worker sends announcements outside the HTTP request. At most ten unfinished broadcasts are accepted. One announcement is claimed at a time, paced to at most one per second globally, with a 120-second lease and 30-second send timeout; stop retrying after five attempts. The single deployed service wakes its worker after API submission and drains persisted jobs at startup, without polling an empty queue. Check that each recipient is still active and allowed immediately before delivery; skip users blocked after the audience snapshot. Prioritize normal bot replies, pace announcement delivery, honor Telegram retry delays, and use bounded retries for temporary failures. Permanent failures such as users blocking the bot become terminal for that recipient without stopping the job. Recover pending work and expired leases after restarts. Free-hosting sleep can delay delivery, so the API promises queued delivery rather than immediate fan-out. As with other Telegram sends, an ambiguous network result can cause a duplicate on retry; do not claim exactly-once external delivery.
+
+Acceptance: missing/invalid API keys, payload validation, dry-run with no sends, idempotency conflicts and retries, correct audience selection, access revocation after enqueue, durable restart recovery, bounded delivery, retry delays, permanent failures, accurate progress counts, and unaffected normal bot replies. Tests use a fake Telegram sender; a real announcement requires an explicit admin submission.
+
 ## 10. Decisions to revisit
 
 - Confirm IDR and Asia/Jakarta defaults for all initial users.

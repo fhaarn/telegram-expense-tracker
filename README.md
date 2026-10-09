@@ -161,3 +161,10 @@ Admin API (phase 2): configure a separate `ADMIN_API_KEY` in Render to enable us
 Send `/export` for this month's report, or `/export 2026-09-01 2026-09-30` for an inclusive date range. The bot sends an XLSX with date-grouped expenses, total spending, and a category pie chart. There is no expense ID or income section. Category totals are on the supporting Categories sheet.
 
 Limits: 366 days, 2,000 expenses, 5 MB, one request every five minutes, one queued report per user, and 20 queued reports globally. Each report is a snapshot at request time. Edits in Excel do not sync back; request a new export for updated bot data. Data is isolated to the requester; blocked users cannot export. The existing delivery worker handles XLSX attachments and retries. No new environment variables or external services are required; migration 008 runs at startup.
+
+
+### Bulk expenses and announcements (Phase 6)
+
+Send 2–20 expenses in one message, one per line. The bot reuses remembered categories, asks for unknown ones, then asks for one date for the batch. Review and Save all; use `/bulk` to resume or `/cancel` to discard. [Interaction report](docs/phase-6-report.md).
+
+Admin announcements use the existing `ADMIN_API_KEY` / `X-API-Key`: preview or queue through `POST /admin/broadcasts`, then check `GET /admin/broadcasts/{id}`. Sending requires explicit `dry_run: false` and an `Idempotency-Key`. [Request examples and delivery behavior](docs/admin-api.md#announcements-phase-6). No new environment variables; migration 009 runs at startup.

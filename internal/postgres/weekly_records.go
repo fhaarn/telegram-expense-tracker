@@ -64,7 +64,7 @@ func weeklyRecord(ctx context.Context, tx pgx.Tx, uid, expenseID, updateID int64
 	label, money := category.Label(cat), parser.FormatAmount(amount)
 	body := fmt.Sprintf("😱 %s just set a new weekly record!\n%s · %s", name, label, money)
 	_, err = tx.Exec(ctx, `INSERT INTO notification_outbox(update_id,user_id,chat_id,body,pair_id)
- SELECT $1,id,telegram_chat_id,$3,$4 FROM users WHERE id=$2`, updateID, partner, body, pair)
+ SELECT $1,id,telegram_chat_id,$3,$4 FROM users WHERE id=$2 ON CONFLICT(update_id,user_id) DO UPDATE SET body=notification_outbox.body || E'\n' || split_part(excluded.body,E'\n',2)`, updateID, partner, body, pair)
 	if err != nil {
 		return "", err
 	}

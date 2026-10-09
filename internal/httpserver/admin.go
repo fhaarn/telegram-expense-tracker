@@ -23,12 +23,17 @@ type AdminStore interface {
 }
 
 // AdminHandler has one bounded counter, shared across the single owner's key.
-func AdminHandler(key string, store AdminStore) http.Handler {
+func AdminHandler(key string, store AdminStore, wake ...func()) http.Handler {
 	var mu sync.Mutex
 	var window time.Time
 	count := 0
 	expected := sha256.Sum256([]byte(key))
 	mux := http.NewServeMux()
+	var notify func()
+	if len(wake) > 0 {
+		notify = wake[0]
+	}
+	registerBroadcasts(mux, store, notify)
 	output := func(w http.ResponseWriter, v any) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
@@ -155,7 +160,11 @@ func AdminHandler(key string, store AdminStore) http.Handler {
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
-		r.Body = http.MaxBytesReader(w, r.Body, 4096)
+		limit := int64(4096)
+		if r.URL.Path == "/admin/broadcasts" {
+			limit = 32768
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, limit)
 		mux.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
